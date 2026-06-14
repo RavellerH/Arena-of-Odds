@@ -9,11 +9,11 @@ const uiState = {
   pendingName: '',
   pendingAvatar: AVATARS[0].id,
   pendingSkill: SKILL_IDS[0],
-  // Fight display state — tracks results for sequential reveal
-  attackCoin: null,   // 'heads' | 'tails' | null
-  attackDice: null,   // 1–6 | null
-  defendCoin: null,   // 'heads' | 'tails' | null
-  defendDice: null,   // 1–6 | null
+  attackCoin: null,
+  attackDice: null,
+  attackExplosion: null,
+  defendCoin: null,
+  defendDice: null,
   isLeagueFinal: false,
   cupIsFinal: false,
 };
@@ -62,6 +62,13 @@ function renderPassiveBadge(avatarId) {
   return `<span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color}" title="${p.description}">${p.icon} ${p.name}</span>`;
 }
 
+function renderStanceBadge(stanceId) {
+  if (!stanceId) return '';
+  const s = STANCES[stanceId];
+  if (!s) return '';
+  return `<span class="skill-badge stance-badge" style="color:${s.color};border-color:${s.color}">${s.icon} ${s.name}</span>`;
+}
+
 function renderPips(wins, maxRounds) {
   const needed = Math.ceil(maxRounds / 2);
   let html = '';
@@ -86,6 +93,7 @@ function escapeHtml(str) {
 function clearFightDisplay() {
   uiState.attackCoin = null;
   uiState.attackDice = null;
+  uiState.attackExplosion = null;
   uiState.defendCoin = null;
   uiState.defendDice = null;
 }
@@ -162,10 +170,12 @@ function renderFighterSetup() {
   let avatarGrid = '';
   for (const av of AVATARS) {
     const sel = uiState.pendingAvatar === av.id ? 'selected' : '';
+    const p = AVATAR_PASSIVES[av.id];
     avatarGrid += `
       <div class="avatar-option ${sel}" onclick="selectAvatar('${av.id}')">
         <span class="av-icon">${av.icon}</span>
         <span class="av-label">${av.label}</span>
+        ${p ? `<span class="av-passive" style="color:${p.color}">${p.icon} ${p.name}</span>` : ''}
       </div>`;
   }
 
@@ -198,7 +208,7 @@ function renderFighterSetup() {
       </div>
 
       <div>
-        <div class="input-label">Avatar</div>
+        <div class="input-label">Avatar <span style="color:var(--muted);font-size:0.75rem">(includes a unique passive ability)</span></div>
         <div class="avatar-grid">${avatarGrid}</div>
       </div>
 
@@ -339,7 +349,7 @@ function launchCurrentCupMatch() {
   uiState.isLeagueFinal = false;
   clearFightDisplay();
   startMatch(match.fighter1Id, match.fighter2Id, isFinal ? 5 : 3);
-  renderFight(isFinal ? `${round.name}` : `${round.name}`, 'cup');
+  renderFight(`${round.name}`, 'cup');
 }
 
 function continueAfterMatch() {
@@ -370,10 +380,100 @@ function cupTiebreak() {
   return f1rw >= f2rw ? m.fighter1Id : m.fighter2Id;
 }
 
+// ── DECLARE PHASE ─────────────────────────────────────────────────────────────
+
+function renderDeclarePhase(matchTitle) {
+  const m = gameState.currentMatch;
+  const f1 = getFighter(m.fighter1Id);
+  const f2 = getFighter(m.fighter2Id);
+
+  if (m.phase === 'declare_reveal') {
+    const s1 = STANCES[m.stances[m.fighter1Id]];
+    const s2 = STANCES[m.stances[m.fighter2Id]];
+    setHTML('screen-fight', `
+      <div class="fight-header">
+        <span class="match-title">${escapeHtml(matchTitle || 'Match')}</span>
+        <span class="round-info">Round ${m.round}</span>
+      </div>
+      <div class="declare-reveal">
+        <div class="declare-reveal-title">⚔️ Stances Revealed!</div>
+        <div class="declare-reveal-row">
+          <div class="declare-reveal-card" style="border-color:${s1.color}">
+            <div class="declare-rev-name">${avatarIcon(f1.avatar)} ${escapeHtml(f1.name)}</div>
+            <div class="declare-rev-stance" style="color:${s1.color}">${s1.icon} ${s1.name}</div>
+            <div class="declare-rev-desc">${s1.desc}</div>
+          </div>
+          <div class="declare-vs">VS</div>
+          <div class="declare-reveal-card" style="border-color:${s2.color}">
+            <div class="declare-rev-name">${avatarIcon(f2.avatar)} ${escapeHtml(f2.name)}</div>
+            <div class="declare-rev-stance" style="color:${s2.color}">${s2.icon} ${s2.name}</div>
+            <div class="declare-rev-desc">${s2.desc}</div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-large" onclick="startRoundFromDeclare()">
+          ⚔️ Begin Round ${m.round}!
+        </button>
+      </div>
+    `);
+    showScreen('screen-fight');
+    return;
+  }
+
+  const isP1Turn = m.phase === 'declare_1';
+  const declaring = isP1Turn ? f1 : f2;
+  const other     = isP1Turn ? f2 : f1;
+
+  const stanceCards = STANCE_IDS.map(sid => {
+    const s = STANCES[sid];
+    return `
+      <div class="stance-option" onclick="selectStance('${sid}')" style="border-color:${s.color}20">
+        <div class="stance-opt-icon" style="color:${s.color}">${s.icon}</div>
+        <div class="stance-opt-name" style="color:${s.color}">${s.name}</div>
+        <div class="stance-opt-desc">${s.desc}</div>
+      </div>`;
+  }).join('');
+
+  setHTML('screen-fight', `
+    <div class="fight-header">
+      <span class="match-title">${escapeHtml(matchTitle || 'Match')}</span>
+      <span class="round-info">Round ${m.round} — Declare</span>
+    </div>
+    <div class="declare-screen">
+      <div class="declare-lookaway">
+        👀 <strong>${escapeHtml(other.name)}</strong>, look away!
+      </div>
+      <div class="declare-prompt">
+        ${avatarIcon(declaring.avatar)} <strong>${escapeHtml(declaring.name)}</strong>, choose your stance
+      </div>
+      <div class="stance-grid">${stanceCards}</div>
+    </div>
+  `);
+  showScreen('screen-fight');
+}
+
+function selectStance(stanceId) {
+  doStanceDeclare(stanceId);
+  rerenderFight();
+}
+
+function startRoundFromDeclare() {
+  doStanceReveal();
+  rerenderFight();
+}
+
 // ── FIGHT SCREEN ──────────────────────────────────────────────────────────────
 
 function renderFight(matchTitle, context) {
   const m = gameState.currentMatch;
+  m._title = matchTitle;
+  m._context = context;
+
+  // Declare phases handled separately
+  if (m.phase === 'declare_1' || m.phase === 'declare_2' || m.phase === 'declare_reveal') {
+    renderDeclarePhase(matchTitle);
+    return;
+  }
+
   const f1 = getFighter(m.fighter1Id);
   const f2 = getFighter(m.fighter2Id);
   const attacker = getAttacker();
@@ -381,7 +481,6 @@ function renderFight(matchTitle, context) {
   const phase = m.phase;
   const maxRounds = m.maxRounds;
 
-  // Who is acting this phase?
   const isDefendPhase = phase === 'defend_coin' || phase === 'defend_roll';
   const isCoinPhase   = phase === 'attack_coin' || phase === 'defend_coin';
   const isDicePhase   = phase === 'attack_roll' || phase === 'defend_roll';
@@ -389,7 +488,7 @@ function renderFight(matchTitle, context) {
   const actor = isDefendPhase ? defender : attacker;
   const activeId = isEndPhase ? null : actor.id;
 
-  // ── Context chips (previous results in this turn) ──
+  // ── Context chips ──
   let chips = '';
   if (phase === 'attack_roll') {
     chips = `<span class="ctx-chip heads">🪙 HEADS</span>`;
@@ -397,12 +496,19 @@ function renderFight(matchTitle, context) {
   if (phase === 'defend_coin' || phase === 'defend_roll') {
     if (uiState.attackCoin === 'heads')
       chips += `<span class="ctx-chip heads">⚔️ HEADS</span>`;
-    if (uiState.attackDice)
-      chips += `<span class="ctx-chip dice">⚔️ Rolled ${DICE_FACES[uiState.attackDice]} (${uiState.attackDice})</span>`;
+    if (uiState.attackDice) {
+      let diceLabel = `⚔️ Rolled ${DICE_FACES[Math.min(uiState.attackDice, 6)]} (${uiState.attackDice})`;
+      if (uiState.attackExplosion) diceLabel += ` 💥+${uiState.attackExplosion}`;
+      chips += `<span class="ctx-chip dice">${diceLabel}</span>`;
+    }
   }
   if (phase === 'defend_roll' && uiState.defendCoin === 'heads') {
     chips += `<span class="ctx-chip heads">🛡️ HEADS</span>`;
   }
+
+  // ── Shadow Blitz / Eagle Eye awareness for coin display ──
+  const shadowActive = m.ultFlags && m.ultFlags[attacker.id + '_shadowblitz'];
+  const eagleTailsActive = m.ultFlags && m.ultFlags[attacker.id + '_eagleeye_tails'];
 
   // ── Main central element ──
   let mainEl, roleLabel, actionLabel, actionBtn;
@@ -413,16 +519,21 @@ function renderFight(matchTitle, context) {
     const coinCls  = coinResult || 'pending';
     mainEl = `<div class="big-coin ${coinCls}" id="fight-coin">${coinText}</div>`;
     roleLabel   = phase === 'attack_coin' ? '⚔️ ATTACKER' : '🛡️ DEFENDER';
-    actionLabel = phase === 'attack_coin' ? 'Flip your attack coin' : 'Flip your defense coin';
-    actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">
-      🪙 Flip — ${escapeHtml(actor.name)}
-    </button>`;
+    actionLabel = phase === 'attack_coin'
+      ? (shadowActive ? '🌑 Shadow Blitz — Attack coin is auto-HEADS!' : 'Flip your attack coin')
+      : (eagleTailsActive ? '🦅 Eagle Eye — Defense coin is forced TAILS!' : 'Flip your defense coin');
+    const btnLabel = phase === 'attack_coin'
+      ? (shadowActive ? '🌑 Shadow Blitz!' : `🪙 Flip — ${escapeHtml(actor.name)}`)
+      : (eagleTailsActive ? `🦅 Eagle Eye!` : `🪙 Flip — ${escapeHtml(actor.name)}`);
+    actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">${btnLabel}</button>`;
 
   } else if (isDicePhase) {
-    const diceVal = phase === 'attack_roll' ? uiState.attackDice : uiState.defendDice;
-    const diceFace = diceVal ? DICE_FACES[diceVal] : '🎲';
-    const diceCls  = diceVal ? 'rolled' : '';
-    mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${diceFace}</div>`;
+    const rawDice = phase === 'attack_roll' ? uiState.attackDice : uiState.defendDice;
+    const displayDice = rawDice ? Math.min(rawDice, 6) : null;
+    const diceFace = displayDice ? DICE_FACES[displayDice] : '🎲';
+    const diceCls  = rawDice ? 'rolled' : '';
+    const explosion = phase === 'attack_roll' && uiState.attackExplosion;
+    mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${diceFace}${explosion ? `<span class="explosion-badge">+${uiState.attackExplosion}</span>` : ''}</div>`;
     roleLabel   = phase === 'attack_roll' ? '⚔️ ATTACKER' : '🛡️ DEFENDER';
     actionLabel = phase === 'attack_roll' ? 'Roll your attack dice' : 'Roll your defense dice';
     actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">
@@ -442,9 +553,26 @@ function renderFight(matchTitle, context) {
     actionBtn   = `<button class="btn btn-gold btn-large" onclick="handleFightAction()">View Results →</button>`;
   }
 
+  // ── Ultimate button (attack turn only, if not yet used) ──
+  let ultBtn = '';
+  if (phase === 'attack_coin' && !m.ultUsed[actor.id]) {
+    const ult = ULTIMATES[actor.avatar];
+    if (ult) {
+      ultBtn = `
+        <button class="btn-ult" onclick="useUltimate()" style="--ult-col:${ult.color}" title="${ult.desc}">
+          ${ult.icon} ${ult.name} <span class="ult-tag">ULTIMATE</span>
+        </button>`;
+    }
+  }
+
   const f1Active = activeId === f1.id ? 'active-panel' : '';
   const f2Active = activeId === f2.id ? 'active-panel' : '';
   const logHtml  = m.log.map(e => `<div class="log-line ${e.type}">${e.text}</div>`).join('');
+
+  const f1UltUsed = m.ultUsed && m.ultUsed[f1.id];
+  const f2UltUsed = m.ultUsed && m.ultUsed[f2.id];
+  const u1 = ULTIMATES[f1.avatar];
+  const u2 = ULTIMATES[f2.avatar];
 
   setHTML('screen-fight', `
     <div class="fight-header">
@@ -463,7 +591,11 @@ function renderFight(matchTitle, context) {
         <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
           ${renderSkillBadge(f1.skill)}
           ${renderPassiveBadge(f1.avatar)}
+          ${renderStanceBadge(m.stances[f1.id])}
         </div>
+        ${u1 ? `<div class="ult-indicator ${f1UltUsed ? 'ult-used' : 'ult-ready'}" style="${!f1UltUsed ? `color:${u1.color}` : ''}">
+          ${u1.icon} ${f1UltUsed ? 'Ult Used' : 'Ult Ready'}
+        </div>` : ''}
       </div>
       <div class="fighter-panel ${f2Active}">
         <div class="fighter-name-row">
@@ -475,7 +607,11 @@ function renderFight(matchTitle, context) {
         <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
           ${renderSkillBadge(f2.skill)}
           ${renderPassiveBadge(f2.avatar)}
+          ${renderStanceBadge(m.stances[f2.id])}
         </div>
+        ${u2 ? `<div class="ult-indicator ${f2UltUsed ? 'ult-used' : 'ult-ready'}" style="${!f2UltUsed ? `color:${u2.color}` : ''}">
+          ${u2.icon} ${f2UltUsed ? 'Ult Used' : 'Ult Ready'}
+        </div>` : ''}
       </div>
     </div>
 
@@ -490,14 +626,15 @@ function renderFight(matchTitle, context) {
 
       ${mainEl}
 
-      ${actionBtn}
+      <div class="action-btns">
+        ${actionBtn}
+        ${ultBtn}
+      </div>
     </div>
 
     <div class="action-log" id="fight-log">${logHtml}</div>
   `);
 
-  m._title = matchTitle;
-  m._context = context;
   showScreen('screen-fight');
 }
 
@@ -506,22 +643,22 @@ function handleFightAction() {
   const phase = m.phase;
 
   if (phase === 'attack_coin') {
-    clearFightDisplay();                           // fresh turn
-    const { coin, reroll } = doAttackCoin();
-    uiState.attackCoin = (reroll !== undefined) ? reroll : coin;
+    clearFightDisplay();
+    const { coin, reroll, shadowBlitz } = doAttackCoin();
+    uiState.attackCoin = shadowBlitz ? 'heads' : (reroll !== undefined ? reroll : coin);
     rerenderFight();
     animateEl('fight-coin', 'flip-anim');
 
   } else if (phase === 'attack_roll') {
-    const { roll } = doAttackRoll();
+    const { roll, explosionBonus } = doAttackRoll();
     uiState.attackDice = roll;
+    uiState.attackExplosion = explosionBonus || null;
     rerenderFight();
     animateEl('fight-dice', 'roll-anim');
 
   } else if (phase === 'defend_coin') {
-    const { coin } = doDefendCoin();
-    uiState.defendCoin = coin;
-    // If defense was TAILS the turn ended — clear stale attack results
+    const { coin, eagleEye } = doDefendCoin();
+    uiState.defendCoin = eagleEye ? 'tails' : coin;
     if (m.phase !== 'defend_roll') clearFightDisplay();
     rerenderFight();
     animateEl('fight-coin', 'flip-anim');
@@ -529,7 +666,6 @@ function handleFightAction() {
   } else if (phase === 'defend_roll') {
     const { roll } = doDefendRoll();
     uiState.defendDice = roll;
-    // Turn completed normally (no round end) — clear for incoming attacker
     if (m.phase === 'attack_coin') clearFightDisplay();
     rerenderFight();
     animateEl('fight-dice', 'roll-anim');
@@ -542,6 +678,11 @@ function handleFightAction() {
   } else if (phase === 'match_end') {
     renderMatchResult();
   }
+}
+
+function useUltimate() {
+  doUltimate();
+  rerenderFight();
 }
 
 function rerenderFight() {
@@ -764,15 +905,46 @@ function renderHowToPlay() {
     </div>`;
   }).join('');
 
+  const passivesHtml = Object.entries(AVATAR_PASSIVES).map(([id, p]) => {
+    const av = AVATARS.find(a => a.id === id);
+    return `<div class="log-line" style="padding:5px 0;color:var(--text)">
+      <span style="color:${p.color}">${av ? av.icon : ''} <strong>${av ? av.label : id}</strong>
+        <span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color};margin:0 4px">${p.icon} ${p.name}</span>
+      </span> — ${p.description}
+    </div>`;
+  }).join('');
+
+  const ultimatesHtml = Object.entries(ULTIMATES).map(([id, u]) => {
+    const av = AVATARS.find(a => a.id === id);
+    return `<div class="log-line" style="padding:5px 0;color:var(--text)">
+      <span style="color:${u.color}">${av ? av.icon : ''} <strong>${av ? av.label : id}</strong>
+        <span class="skill-badge" style="color:${u.color};border-color:${u.color};margin:0 4px">${u.icon} ${u.name}</span>
+      </span> — ${u.desc} <em style="color:var(--muted)">(${u.timing})</em>
+    </div>`;
+  }).join('');
+
+  const stancesHtml = STANCE_IDS.map(sid => {
+    const s = STANCES[sid];
+    return `<div class="log-line" style="padding:5px 0;color:var(--text)">
+      <span style="color:${s.color}">${s.icon} <strong>${s.name}</strong></span> — ${s.desc}
+    </div>`;
+  }).join('');
+
   setHTML('screen-howtoplay', `
     <div class="howto-content">
       <h2 style="text-align:center">How to Play</h2>
 
       <div class="card howto-section">
+        <h3>Round Start — Declare Stance</h3>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px">Each round, both fighters secretly pick a stance (hot-seat style) before combat begins.</p>
+        <div>${stancesHtml}</div>
+      </div>
+
+      <div class="card howto-section">
         <h3>Turn Order</h3>
         <ol>
           <li><strong>Attack Coin</strong> — Attacker flips. HEADS = proceed. TAILS = turn ends.</li>
-          <li><strong>Attack Dice</strong> — Attacker rolls 1d6. Result is the attack value (1–6).</li>
+          <li><strong>Attack Dice</strong> — Attacker rolls 1d6. Rolling a 6 adds an explosive bonus roll!</li>
           <li><strong>Defense Coin</strong> — Defender flips. HEADS = proceed. TAILS = full damage.</li>
           <li><strong>Defense Dice</strong> — Defender rolls 1d6. Roll ≥ attack = blocked. Roll &lt; attack = damage.</li>
         </ol>
@@ -784,7 +956,19 @@ function renderHowToPlay() {
           <li>Defense TAILS → <strong>attack value × 10</strong></li>
           <li>Defense HEADS, blocked → <strong>0 damage</strong></li>
           <li>Defense HEADS, not blocked → <strong>(attack − defense) × 10</strong></li>
+          <li>Attack roll of 6 → <strong>explosive bonus die added to attack value!</strong></li>
         </ul>
+      </div>
+
+      <div class="card howto-section">
+        <h3>Ultimates — Once per Match</h3>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px">Use your ultimate at the start of your attack turn. Once used, it's gone for the match.</p>
+        <div>${ultimatesHtml}</div>
+      </div>
+
+      <div class="card howto-section">
+        <h3>Avatar Passives</h3>
+        <div>${passivesHtml}</div>
       </div>
 
       <div class="card howto-section">
@@ -793,23 +977,9 @@ function renderHowToPlay() {
       </div>
 
       <div class="card howto-section">
-        <h3>Avatars &amp; Passives</h3>
-        <div class="skills-list">
-          ${Object.entries(AVATAR_PASSIVES).map(([id, p]) => {
-            const av = AVATARS.find(a => a.id === id);
-            return `<div class="log-line" style="padding:5px 0;color:var(--text)">
-              <span style="color:${p.color}">${av ? av.icon : ''} <strong>${av ? av.label : id}</strong></span>
-              <span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color};margin:0 4px">${p.icon} ${p.name}</span>
-              — ${p.description}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-
-      <div class="card howto-section">
         <h3>Match Rules</h3>
         <ul>
-          <li>Fighters start at <strong>500 LP</strong> per round (Warrior: 600 LP).</li>
+          <li>Fighters start at <strong>500 LP</strong> per round (Warrior: 600 LP, scales upward).</li>
           <li>First to drop opponent to 0 LP wins the round.</li>
           <li>Regular matches: Best of 3. Finals: Best of 5.</li>
           <li>Loser of each round attacks first next round.</li>

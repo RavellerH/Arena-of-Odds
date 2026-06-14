@@ -5,13 +5,29 @@ const PERFECT_HIT_VALUE = 9;
 const MYSTIC_HEAL_AMOUNT = 50;
 const DMG_MULTIPLIER = 10;
 
-// Avatar passive constants
+// Avatar passive base constants
 const WARRIOR_MAX_LP    = 600;
-const MAGE_SPELLPOWER   = 20;   // flat bonus damage (once/round, roll ≥ 5)
-const PALADIN_SHIELD    = 20;   // damage reduction (always-on)
-const WAR_CRY_BONUS     = 10;   // bonus damage per round already won (always-on)
-const HEALER_REJUV      = 30;   // LP recovered at start of first attack turn (once/round)
-const NECRO_DRAIN_PCT   = 0.30; // fraction of damage dealt healed back (once/round)
+const MAGE_SPELLPOWER   = 20;
+const PALADIN_SHIELD    = 20;
+const WAR_CRY_BONUS     = 10;
+const HEALER_REJUV      = 30;
+const NECRO_DRAIN_PCT   = 0.30;
+
+// Scaling passive constants (passive grows each round)
+const WARRIOR_LP_SCALE     = 25;
+const PALADIN_SHIELD_SCALE = 5;
+const HEALER_REJUV_SCALE   = 5;
+const NECRO_DRAIN_SCALE    = 0.05;
+const NECRO_DRAIN_CAP      = 0.50;
+
+// Stance constants
+const ASSAULT_BONUS = 20;
+const COUNTER_DMG   = 30;
+
+// Ultimate constants
+const ULT_HEAL_AMOUNT    = 200;
+const ULT_PALADIN_DMG    = 100;
+const ULT_SOUL_STEAL_PCT = 0.30;
 
 const AVATARS = [
   { id: 'warrior',     icon: '⚔️',  label: 'Warrior'     },
@@ -29,7 +45,7 @@ const AVATAR_PASSIVES = {
     name: 'Battle Hardened',
     icon: '💪',
     color: '#f97316',
-    description: `Start each round with ${WARRIOR_MAX_LP} LP instead of ${MAX_LP}.`,
+    description: `Start at ${WARRIOR_MAX_LP} LP. Gain +${WARRIOR_LP_SCALE} max LP per round won.`,
     type: 'always',
   },
   mage: {
@@ -43,14 +59,14 @@ const AVATAR_PASSIVES = {
     name: 'Assassination',
     icon: '🗡️',
     color: '#f43f5e',
-    description: 'First attack roll of 6 this round bypasses the defender\'s coin flip.',
+    description: "First attack roll of 6 this round bypasses the defender's coin flip.",
     type: 'once_round',
   },
   paladin: {
     name: 'Holy Shield',
     icon: '🛡️',
     color: '#facc15',
-    description: `All incoming damage reduced by ${PALADIN_SHIELD} (minimum 0).`,
+    description: `Incoming damage reduced by ${PALADIN_SHIELD} (+ ${PALADIN_SHIELD_SCALE}/round played).`,
     type: 'always',
   },
   berserker: {
@@ -64,7 +80,7 @@ const AVATAR_PASSIVES = {
     name: 'Rejuvenation',
     icon: '💊',
     color: '#34d399',
-    description: `Recover ${HEALER_REJUV} LP at the start of your first attack turn each round.`,
+    description: `Recover ${HEALER_REJUV} LP at start of your first attack turn each round (+ ${HEALER_REJUV_SCALE}/round).`,
     type: 'once_round',
   },
   archer: {
@@ -78,7 +94,7 @@ const AVATAR_PASSIVES = {
     name: 'Life Drain',
     icon: '💉',
     color: '#c084fc',
-    description: `First hit each round heals you for ${Math.round(NECRO_DRAIN_PCT * 100)}% of damage dealt.`,
+    description: `First hit each round heals ${Math.round(NECRO_DRAIN_PCT * 100)}% of damage dealt (+ ${Math.round(NECRO_DRAIN_SCALE * 100)}%/round, max ${Math.round(NECRO_DRAIN_CAP * 100)}%).`,
     type: 'once_round',
   },
 };
@@ -135,3 +151,70 @@ const SKILLS = {
 };
 
 const SKILL_IDS = Object.keys(SKILLS);
+
+const STANCES = {
+  assault:  { id: 'assault',  icon: '⚔️', name: 'Assault',  color: '#f87171', desc: `Deal +${ASSAULT_BONUS} bonus damage on all hits this round.` },
+  counter:  { id: 'counter',  icon: '🛡️', name: 'Counter',  color: '#60a5fa', desc: `On a successful block, deal ${COUNTER_DMG} counter-damage to attacker.` },
+  balanced: { id: 'balanced', icon: '⚖️', name: 'Balanced', color: '#9ca3af', desc: 'No modifier — standard round.' },
+};
+
+const STANCE_IDS = Object.keys(STANCES);
+
+const ULTIMATES = {
+  warrior: {
+    name: 'Last Stand',
+    icon: '🗿',
+    color: '#f97316',
+    desc: 'Activate an immunity shield — the next hit you take this round deals 0 damage.',
+    timing: 'Turn Enhancement',
+  },
+  mage: {
+    name: 'Arcane Surge',
+    icon: '🌟',
+    color: '#818cf8',
+    desc: 'Roll your attack die 3 times this turn and take the highest result.',
+    timing: 'Turn Enhancement',
+  },
+  rogue: {
+    name: 'Shadow Blitz',
+    icon: '🌑',
+    color: '#f43f5e',
+    desc: "Skip both coin flips — your coin auto-HEADS, defender's auto-TAILS.",
+    timing: 'Turn Enhancement',
+  },
+  paladin: {
+    name: 'Divine Strike',
+    icon: '⚜️',
+    color: '#facc15',
+    desc: `Deal ${ULT_PALADIN_DMG} direct damage instantly, bypassing all defenses. Turn ends after.`,
+    timing: 'Instant Attack',
+  },
+  berserker: {
+    name: 'Blood Rage',
+    icon: '💢',
+    color: '#fb923c',
+    desc: 'All damage you deal this round is doubled.',
+    timing: 'Round Enhancement',
+  },
+  healer: {
+    name: 'Revitalize',
+    icon: '💖',
+    color: '#34d399',
+    desc: `Recover ${ULT_HEAL_AMOUNT} LP immediately, then continue your attack.`,
+    timing: 'Instant',
+  },
+  archer: {
+    name: 'Eagle Eye',
+    icon: '🦅',
+    color: '#38bdf8',
+    desc: "Roll attack die twice this turn, take higher. Defender's defense coin forced TAILS.",
+    timing: 'Turn Enhancement',
+  },
+  necromancer: {
+    name: 'Soul Steal',
+    icon: '☠️',
+    color: '#c084fc',
+    desc: `Steal ${Math.round(ULT_SOUL_STEAL_PCT * 100)}% of opponent's current LP directly. Turn ends after.`,
+    timing: 'Instant Attack',
+  },
+};

@@ -19,7 +19,22 @@ function uid() {
 }
 
 function flipCoin() { return Math.random() < 0.5 ? 'heads' : 'tails'; }
-function rollDice()  { return Math.floor(Math.random() * 6) + 1; }
+function rand(n)    { return Math.floor(Math.random() * n) + 1; }
+function rollDice() { return rand(6); }
+
+// ─── Scaling passive helpers ──────────────────────────────────────────────────
+
+function getPaladinShield(m) {
+  return PALADIN_SHIELD + (m.round - 1) * PALADIN_SHIELD_SCALE;
+}
+
+function getHealerRejuv(m) {
+  return HEALER_REJUV + (m.round - 1) * HEALER_REJUV_SCALE;
+}
+
+function getNecroDrain(m) {
+  return Math.min(NECRO_DRAIN_CAP, NECRO_DRAIN_PCT + (m.round - 1) * NECRO_DRAIN_SCALE);
+}
 
 // ─── Fighters ────────────────────────────────────────────────────────────────
 
@@ -164,7 +179,6 @@ function startMatch(fighter1Id, fighter2Id, maxRounds) {
   const f1 = getFighter(fighter1Id);
   const f2 = getFighter(fighter2Id);
 
-  // Apply avatar max LP
   f1.maxLp = f1.avatar === 'warrior' ? WARRIOR_MAX_LP : MAX_LP;
   f2.maxLp = f2.avatar === 'warrior' ? WARRIOR_MAX_LP : MAX_LP;
   f1.lp = f1.maxLp; f1.roundWins = 0;
@@ -175,23 +189,123 @@ function startMatch(fighter1Id, fighter2Id, maxRounds) {
     round: 1, maxRounds,
     roundResults: [],
     attackerId: fighter1Id,
-    phase: 'attack_coin',
+    phase: 'declare_1',
     gamblerUsed: {},
     mysticUsed: {},
-    passiveUsed: {},       // once-per-round avatar passive tracking
-    passiveBonus: 0,       // pending Mage Spellpower bonus
-    assassinActive: false, // Rogue Assassination: skip defender coin
+    passiveUsed: {},
+    passiveBonus: 0,
+    assassinActive: false,
     attackValue: 0,
     attackRoll: 0,
     log: [],
+    stances: {},
+    ultUsed: {},
+    ultFlags: {},
+    warriorLpBonus: {},
   };
-  addLog('⚔️  Round 1 — BEGIN!', 'system');
 }
 
 function addLog(text, type = 'normal') {
   const m = gameState.currentMatch;
   m.log.unshift({ text, type });
-  if (m.log.length > 40) m.log.pop();
+  if (m.log.length > 50) m.log.pop();
+}
+
+// ─── Declare phase ────────────────────────────────────────────────────────────
+
+function doStanceDeclare(stanceId) {
+  const m = gameState.currentMatch;
+  if (m.phase === 'declare_1') {
+    m.stances[m.fighter1Id] = stanceId;
+    m.phase = 'declare_2';
+  } else if (m.phase === 'declare_2') {
+    m.stances[m.fighter2Id] = stanceId;
+    m.phase = 'declare_reveal';
+  }
+}
+
+function doStanceReveal() {
+  const m = gameState.currentMatch;
+  const f1 = getFighter(m.fighter1Id);
+  const f2 = getFighter(m.fighter2Id);
+  const s1 = STANCES[m.stances[m.fighter1Id]];
+  const s2 = STANCES[m.stances[m.fighter2Id]];
+  addLog(`⚔️  Round ${m.round} — BEGIN!`, 'system');
+  addLog(`${f1.name} → ${s1.icon} ${s1.name}  |  ${f2.name} → ${s2.icon} ${s2.name}`, 'stance');
+  m.phase = 'attack_coin';
+}
+
+// ─── Ultimate ─────────────────────────────────────────────────────────────────
+
+function doUltimate() {
+  const m = gameState.currentMatch;
+  const attacker = getAttacker();
+  const defender = getDefender();
+  const av = attacker.avatar;
+  const ult = ULTIMATES[av];
+
+  m.ultUsed[attacker.id] = true;
+  addLog(`💥 ${attacker.name} unleashes ${ult.icon} ${ult.name}!`, 'ultimate');
+
+  switch (av) {
+    case 'warrior':
+      m.ultFlags[attacker.id + '_laststand'] = true;
+      addLog(`🗿 Last Stand! Next hit on ${attacker.name} is nullified.`, 'ultimate');
+      break;
+
+    case 'mage':
+      m.ultFlags[attacker.id + '_surge'] = true;
+      addLog(`🌟 Arcane Surge! Attack die will roll 3× this turn.`, 'ultimate');
+      break;
+
+    case 'rogue':
+      m.ultFlags[attacker.id + '_shadowblitz'] = true;
+      addLog(`🌑 Shadow Blitz! Both coin flips bypassed this turn.`, 'ultimate');
+      break;
+
+    case 'paladin': {
+      let dmg = ULT_PALADIN_DMG;
+      if (defender.avatar === 'paladin') {
+        const shield = getPaladinShield(m);
+        const absorbed = Math.min(dmg, shield);
+        dmg = Math.max(0, dmg - shield);
+        if (absorbed > 0) addLog(`🛡️ Holy Shield absorbs ${absorbed}.`, 'passive');
+      }
+      defender.lp = Math.max(0, defender.lp - dmg);
+      addLog(`⚜️ Divine Strike! ${dmg} direct damage → ${defender.name} LP: ${defender.lp}`, 'damage');
+      const endedP = checkRoundEnd();
+      if (!endedP) passTurn();
+      break;
+    }
+
+    case 'berserker':
+      m.ultFlags[attacker.id + '_bloodrage'] = true;
+      addLog(`💢 Blood Rage! All your damage this round is doubled.`, 'ultimate');
+      break;
+
+    case 'healer': {
+      const healed = Math.min(ULT_HEAL_AMOUNT, attacker.maxLp - attacker.lp);
+      attacker.lp = Math.min(attacker.maxLp, attacker.lp + ULT_HEAL_AMOUNT);
+      addLog(`💖 Revitalize! +${healed} LP → ${attacker.name} LP: ${attacker.lp}`, 'heal');
+      break;
+    }
+
+    case 'archer':
+      m.ultFlags[attacker.id + '_eagleeye_dice'] = true;
+      m.ultFlags[attacker.id + '_eagleeye_tails'] = true;
+      addLog(`🦅 Eagle Eye! Attack die rolls 2× (best), ${defender.name}'s defense coin forced TAILS.`, 'ultimate');
+      break;
+
+    case 'necromancer': {
+      const steal = Math.floor(defender.lp * ULT_SOUL_STEAL_PCT);
+      defender.lp = Math.max(0, defender.lp - steal);
+      attacker.lp = Math.min(attacker.maxLp, attacker.lp + steal);
+      addLog(`☠️ Soul Steal! Drained ${steal} LP → ${defender.name}: ${defender.lp} | ${attacker.name}: ${attacker.lp}`, 'damage');
+      const endedN = checkRoundEnd();
+      if (!endedN) passTurn();
+      break;
+    }
+  }
 }
 
 // ─── Combat phases ───────────────────────────────────────────────────────────
@@ -200,15 +314,24 @@ function doAttackCoin() {
   const attacker = getAttacker();
   const m = gameState.currentMatch;
 
-  // Healer Rejuvenation: recover LP at start of first attack turn each round
+  // Healer Rejuvenation: scale with round number
   const rejuvKey = attacker.id + '_rejuv';
   if (attacker.avatar === 'healer' && !m.passiveUsed[rejuvKey]) {
     m.passiveUsed[rejuvKey] = true;
-    const healed = Math.min(HEALER_REJUV, attacker.maxLp - attacker.lp);
+    const rejuvAmt = getHealerRejuv(m);
+    const healed = Math.min(rejuvAmt, attacker.maxLp - attacker.lp);
     if (healed > 0) {
       attacker.lp += healed;
-      addLog(`💊 Rejuvenation! ${attacker.name} recovers ${healed} LP → ${attacker.lp}`, 'passive');
+      addLog(`💊 Rejuvenation! ${attacker.name} recovers ${healed} LP → ${attacker.lp} (Rnd ${m.round}: ${rejuvAmt} max)`, 'passive');
     }
+  }
+
+  // Shadow Blitz: skip attack coin
+  const shadowKey = attacker.id + '_shadowblitz';
+  if (m.ultFlags[shadowKey]) {
+    addLog(`🌑 ${attacker.name}'s attack coin bypassed (Shadow Blitz)!`, 'ultimate');
+    m.phase = 'attack_roll';
+    return { coin: 'heads', shadowBlitz: true };
   }
 
   const coin = flipCoin();
@@ -222,7 +345,7 @@ function doAttackCoin() {
   if (attacker.skill === 'gamblers_edge' && !m.gamblerUsed[attacker.id]) {
     m.gamblerUsed[attacker.id] = true;
     const reroll = flipCoin();
-    addLog(`${attacker.name} flips — TAILS! ⚡ Gambler's Edge — rerolling...`, 'skill');
+    addLog(`${attacker.name} flips — TAILS! 🎲 Gambler's Edge — rerolling...`, 'skill');
     if (reroll === 'heads') {
       addLog(`Reroll: HEADS! Attack proceeds.`, 'heads');
       m.phase = 'attack_roll';
@@ -242,54 +365,98 @@ function doAttackRoll() {
   const attacker = getAttacker();
   const defender = getDefender();
   const m = gameState.currentMatch;
-  const roll = rollDice();
-  m.attackRoll = roll;
+
+  // Determine dice count (Arcane Surge or Eagle Eye)
+  const surgeKey = attacker.id + '_surge';
+  const eagleKey = attacker.id + '_eagleeye_dice';
+  let diceCount = 1;
+  let multLabel = '';
+  if (m.ultFlags[surgeKey]) {
+    diceCount = 3;
+    multLabel = '🌟 Arcane Surge';
+    delete m.ultFlags[surgeKey];
+  } else if (m.ultFlags[eagleKey]) {
+    diceCount = 2;
+    multLabel = '🦅 Eagle Eye';
+    delete m.ultFlags[eagleKey];
+  }
+
+  const rolls = Array.from({ length: diceCount }, rollDice);
+  const baseRoll = Math.max(...rolls);
+
+  if (diceCount > 1) {
+    addLog(`${multLabel}! Rolled [${rolls.join(', ')}] → kept ${baseRoll}.`, 'ultimate');
+  }
+
+  // Explosive dice: natural 6 adds a bonus roll
+  let roll = baseRoll;
+  let explosionBonus = 0;
+  if (baseRoll === 6) {
+    explosionBonus = rollDice();
+    roll = baseRoll + explosionBonus;
+    addLog(`💥 Explosive! 6 + ${explosionBonus} = ${roll} total attack value!`, 'passive');
+  }
+
+  m.attackRoll = baseRoll;
   m.passiveBonus = 0;
   let attackValue = roll;
 
-  // Skill checks on original roll
-  if (attacker.skill === 'perfect_hit' && roll === 3) {
+  // Skill checks on base roll
+  if (attacker.skill === 'perfect_hit' && baseRoll === 3) {
     attackValue = PERFECT_HIT_VALUE;
     addLog(`${attacker.name} rolls 3 — 🎯 Perfect Hit! Attack value: ${PERFECT_HIT_VALUE}.`, 'skill');
-  } else if (attacker.skill === 'double_strike' && roll === 6) {
-    addLog(`${attacker.name} rolls 6 — ⚡ Double Strike primed!`, 'skill');
-  } else {
-    addLog(`${attacker.name} rolls ${roll}.`, 'normal');
+  } else if (attacker.skill === 'double_strike' && baseRoll === 6) {
+    if (diceCount === 1 && !explosionBonus) addLog(`${attacker.name} rolls ${baseRoll} — ⚡ Double Strike primed!`, 'skill');
+    else addLog(`⚡ Double Strike primed!`, 'skill');
+  } else if (diceCount === 1 && !explosionBonus) {
+    addLog(`${attacker.name} rolls ${baseRoll}.`, 'normal');
   }
 
-  // Archer Precision: floor attack value at 3
+  // Archer Precision: raise low rolls
   if (attacker.avatar === 'archer' && attackValue < 3) {
     addLog(`🏹 Precision! ${attacker.name}'s roll raised to 3.`, 'passive');
     attackValue = 3;
   }
 
-  // Mage Spellpower: first roll ≥5 this round adds bonus damage
+  // Mage Spellpower: first roll ≥5 this round
   const spellKey = attacker.id + '_spellpower';
-  if (attacker.avatar === 'mage' && roll >= 5 && !m.passiveUsed[spellKey]) {
+  if (attacker.avatar === 'mage' && baseRoll >= 5 && !m.passiveUsed[spellKey]) {
     m.passiveUsed[spellKey] = true;
     m.passiveBonus = MAGE_SPELLPOWER;
     addLog(`✨ Spellpower! +${MAGE_SPELLPOWER} bonus damage.`, 'passive');
   }
 
-  // Rogue Assassination: first roll 6 this round bypasses defender's coin flip
+  // Rogue Assassination: first roll 6 bypasses defender coin
   const assKey = attacker.id + '_assassination';
-  if (attacker.avatar === 'rogue' && roll === 6 && !m.passiveUsed[assKey]) {
+  if (attacker.avatar === 'rogue' && baseRoll === 6 && !m.passiveUsed[assKey]) {
     m.passiveUsed[assKey] = true;
-    addLog(`🗡️ Assassination! ${defender.name}'s defense coin is bypassed!`, 'passive');
+    addLog(`🗡️ Assassination! ${defender.name}'s defense coin bypassed!`, 'passive');
     m.attackValue = attackValue;
-    m.phase = 'defend_roll'; // skip defend_coin
-    return { roll, attackValue, assassination: true };
+    m.phase = 'defend_roll';
+    return { roll: baseRoll, attackValue, assassination: true, explosionBonus };
   }
 
   m.attackValue = attackValue;
   m.phase = 'defend_coin';
-  return { roll, attackValue };
+  return { roll: baseRoll, attackValue, explosionBonus };
 }
 
 function doDefendCoin() {
   const defender = getDefender();
   const attacker = getAttacker();
   const m = gameState.currentMatch;
+
+  // Eagle Eye: force TAILS on defender's coin
+  const eagleTailsKey = attacker.id + '_eagleeye_tails';
+  if (m.ultFlags[eagleTailsKey]) {
+    delete m.ultFlags[eagleTailsKey];
+    addLog(`🦅 Eagle Eye! ${defender.name}'s defense coin forced TAILS!`, 'ultimate');
+    let dmg = m.attackValue * DMG_MULTIPLIER;
+    dmg = applyDmgMods(dmg, attacker, defender, m);
+    dealDamage(defender, attacker, dmg, m);
+    return { coin: 'tails', eagleEye: true };
+  }
+
   const coin = flipCoin();
 
   if (coin === 'tails') {
@@ -316,12 +483,22 @@ function doDefendRoll() {
     addLog(`${defender.name} rolls 6 — 🛡️ Iron Guard! Attack negated!`, 'skill');
     let reflectDmg = IRON_GUARD_REFLECT;
     if (attacker.avatar === 'paladin') {
-      const blocked = Math.min(reflectDmg, PALADIN_SHIELD);
-      reflectDmg = Math.max(0, reflectDmg - PALADIN_SHIELD);
-      if (blocked > 0) addLog(`🛡️ Holy Shield absorbs ${blocked} reflect damage.`, 'passive');
+      const shield = getPaladinShield(m);
+      const absorbed = Math.min(reflectDmg, shield);
+      reflectDmg = Math.max(0, reflectDmg - shield);
+      if (absorbed > 0) addLog(`🛡️ Holy Shield absorbs ${absorbed} reflect damage.`, 'passive');
     }
-    attacker.lp = Math.max(0, attacker.lp - reflectDmg);
-    if (reflectDmg > 0) addLog(`${attacker.name} takes ${reflectDmg} reflected damage → LP: ${attacker.lp}`, 'damage');
+    if (reflectDmg > 0) {
+      // Last Stand check for reflected damage hitting attacker
+      const lastStandKey = attacker.id + '_laststand';
+      if (m.ultFlags[lastStandKey]) {
+        delete m.ultFlags[lastStandKey];
+        addLog(`🗿 Last Stand! ${attacker.name} is immune to the reflect!`, 'ultimate');
+      } else {
+        attacker.lp = Math.max(0, attacker.lp - reflectDmg);
+        addLog(`${attacker.name} takes ${reflectDmg} reflected damage → LP: ${attacker.lp}`, 'damage');
+      }
+    }
     const ended = checkRoundEnd();
     if (!ended) passTurn();
     return { roll, ironGuard: true };
@@ -329,6 +506,28 @@ function doDefendRoll() {
 
   if (roll >= m.attackValue) {
     addLog(`${defender.name} rolls ${roll} — BLOCKED! (${roll} ≥ ${m.attackValue})`, 'block');
+
+    // Counter stance: deal damage on block
+    if (m.stances[defender.id] === 'counter') {
+      let counterDmg = COUNTER_DMG;
+      if (attacker.avatar === 'paladin') {
+        const shield = getPaladinShield(m);
+        const absorbed = Math.min(counterDmg, shield);
+        counterDmg = Math.max(0, counterDmg - shield);
+        if (absorbed > 0) addLog(`🛡️ Holy Shield absorbs ${absorbed} counter-damage.`, 'passive');
+      }
+      const lastStandKey = attacker.id + '_laststand';
+      if (counterDmg > 0 && m.ultFlags[lastStandKey]) {
+        delete m.ultFlags[lastStandKey];
+        addLog(`🗿 Last Stand! ${attacker.name} blocks counter-damage!`, 'ultimate');
+      } else if (counterDmg > 0) {
+        attacker.lp = Math.max(0, attacker.lp - counterDmg);
+        addLog(`🛡️ Counter! ${attacker.name} takes ${counterDmg} damage → LP: ${attacker.lp}`, 'stance');
+      }
+      const endedC = checkRoundEnd();
+      if (endedC) return { roll, blocked: true, counter: counterDmg };
+    }
+
     passTurn();
     return { roll, blocked: true };
   }
@@ -343,30 +542,46 @@ function doDefendRoll() {
 function applyDmgMods(dmg, attacker, defender, m) {
   if (dmg <= 0) return 0;
 
-  // Skill modifiers
+  // Skill: Double Strike
   if (attacker.skill === 'double_strike' && m.attackRoll === 6) {
     dmg *= 2;
     addLog(`⚡ Double Strike! Damage ×2 → ${dmg}`, 'skill');
   }
+  // Skill: Berserker (attacker)
   if (attacker.skill === 'berserker' && attacker.lp < BERSERKER_THRESHOLD) {
     dmg *= 2;
     addLog(`🔥 Berserker Rage! Damage ×2 → ${dmg}`, 'skill');
   }
+  // Skill: Berserker (defender vulnerability)
   if (defender.skill === 'berserker' && defender.lp < BERSERKER_THRESHOLD) {
     dmg *= 2;
     addLog(`🔥 Berserker Vulnerability! Damage ×2 → ${dmg}`, 'skill');
   }
 
-  // Avatar passives
+  // Avatar: Mage Spellpower bonus
   if (m.passiveBonus > 0) {
     dmg += m.passiveBonus;
     m.passiveBonus = 0;
   }
 
+  // Avatar: Berserker War Cry
   if (attacker.avatar === 'berserker' && attacker.roundWins > 0) {
     const wc = attacker.roundWins * WAR_CRY_BONUS;
     dmg += wc;
     addLog(`⚡ War Cry! +${wc} damage (${attacker.roundWins} rounds won)`, 'passive');
+  }
+
+  // Stance: Assault bonus
+  if (m.stances[attacker.id] === 'assault') {
+    dmg += ASSAULT_BONUS;
+    addLog(`⚔️ Assault! +${ASSAULT_BONUS} bonus damage → ${dmg}`, 'stance');
+  }
+
+  // Ultimate: Blood Rage
+  const rageKey = attacker.id + '_bloodrage';
+  if (m.ultFlags[rageKey]) {
+    dmg *= 2;
+    addLog(`💢 Blood Rage! Damage ×2 → ${dmg}`, 'ultimate');
   }
 
   return dmg;
@@ -375,32 +590,47 @@ function applyDmgMods(dmg, attacker, defender, m) {
 function dealDamage(defender, attacker, dmg, m) {
   if (dmg <= 0) { const r = checkRoundEnd(); if (!r) passTurn(); return; }
 
-  // Paladin Holy Shield: reduce incoming damage
-  if (defender.avatar === 'paladin' && PALADIN_SHIELD > 0) {
-    const blocked = Math.min(dmg, PALADIN_SHIELD);
-    dmg = Math.max(0, dmg - PALADIN_SHIELD);
-    addLog(`🛡️ Holy Shield! ${blocked} absorbed → ${dmg} net damage.`, 'passive');
-    if (dmg <= 0) { const r = checkRoundEnd(); if (!r) passTurn(); return; }
+  // Ultimate: Last Stand — nullify next hit
+  const lastStandKey = defender.id + '_laststand';
+  if (m.ultFlags[lastStandKey]) {
+    delete m.ultFlags[lastStandKey];
+    addLog(`🗿 Last Stand! ${defender.name} is immune — ${dmg} damage nullified!`, 'ultimate');
+    const rLS = checkRoundEnd();
+    if (!rLS) passTurn();
+    return;
+  }
+
+  // Avatar: Paladin Holy Shield (scales with round)
+  if (defender.avatar === 'paladin') {
+    const shield = getPaladinShield(m);
+    if (shield > 0) {
+      const absorbed = Math.min(dmg, shield);
+      dmg = Math.max(0, dmg - shield);
+      addLog(`🛡️ Holy Shield! ${absorbed} absorbed (shield: ${shield}) → ${dmg} net damage.`, 'passive');
+      if (dmg <= 0) { const r = checkRoundEnd(); if (!r) passTurn(); return; }
+    }
   }
 
   defender.lp = Math.max(0, defender.lp - dmg);
   addLog(`${defender.name} takes ${dmg} damage! LP: ${defender.lp}`, 'damage');
 
-  // Mystic Heal skill
+  // Skill: Mystic Heal
   if (defender.skill === 'mystic_heal' && !m.mysticUsed[defender.id] && defender.lp > 0) {
     m.mysticUsed[defender.id] = true;
+    const healed = Math.min(MYSTIC_HEAL_AMOUNT, defender.maxLp - defender.lp);
     defender.lp = Math.min(defender.maxLp, defender.lp + MYSTIC_HEAL_AMOUNT);
-    addLog(`💚 Mystic Heal! ${defender.name} recovers ${MYSTIC_HEAL_AMOUNT} LP → ${defender.lp}`, 'heal');
+    addLog(`💚 Mystic Heal! ${defender.name} recovers ${healed} LP → ${defender.lp}`, 'heal');
   }
 
-  // Necromancer Life Drain: first hit heals attacker 30%
+  // Avatar: Necromancer Life Drain (scales with round)
   const drainKey = attacker.id + '_lifedrain';
   if (attacker.avatar === 'necromancer' && !m.passiveUsed[drainKey]) {
     m.passiveUsed[drainKey] = true;
-    const healAmt = Math.floor(dmg * NECRO_DRAIN_PCT);
+    const drainPct = getNecroDrain(m);
+    const healAmt = Math.floor(dmg * drainPct);
     if (healAmt > 0) {
       attacker.lp = Math.min(attacker.maxLp, attacker.lp + healAmt);
-      addLog(`💉 Life Drain! ${attacker.name} recovers ${healAmt} LP → ${attacker.lp}`, 'passive');
+      addLog(`💉 Life Drain! ${attacker.name} recovers ${healAmt} LP → ${attacker.lp} (${Math.round(drainPct * 100)}%)`, 'passive');
     }
   }
 
@@ -410,6 +640,11 @@ function dealDamage(defender, attacker, dmg, m) {
 
 function passTurn() {
   const m = gameState.currentMatch;
+  // Clear turn-scoped ult flags
+  const turnSuffixes = ['_shadowblitz', '_eagleeye_dice', '_eagleeye_tails', '_surge'];
+  for (const key of Object.keys(m.ultFlags)) {
+    if (turnSuffixes.some(s => key.endsWith(s))) delete m.ultFlags[key];
+  }
   m.attackerId = m.attackerId === m.fighter1Id ? m.fighter2Id : m.fighter1Id;
   m.attackValue = 0;
   m.attackRoll = 0;
@@ -431,9 +666,18 @@ function checkRoundEnd() {
   } else if (f1.lp <= 0) {
     result = 'f2'; f2.roundWins++;
     addLog(`🏆 ${f2.name} wins Round ${m.round}!`, 'system');
+    // Warrior scaling
+    if (f2.avatar === 'warrior') {
+      m.warriorLpBonus[f2.id] = (m.warriorLpBonus[f2.id] || 0) + WARRIOR_LP_SCALE;
+      addLog(`💪 Battle Hardened! ${f2.name} gains +${WARRIOR_LP_SCALE} max LP next round.`, 'passive');
+    }
   } else {
     result = 'f1'; f1.roundWins++;
     addLog(`🏆 ${f1.name} wins Round ${m.round}!`, 'system');
+    if (f1.avatar === 'warrior') {
+      m.warriorLpBonus[f1.id] = (m.warriorLpBonus[f1.id] || 0) + WARRIOR_LP_SCALE;
+      addLog(`💪 Battle Hardened! ${f1.name} gains +${WARRIOR_LP_SCALE} max LP next round.`, 'passive');
+    }
   }
 
   m.roundResults.push(result);
@@ -471,6 +715,14 @@ function startNextRound() {
   const m = gameState.currentMatch;
   const f1 = getFighter(m.fighter1Id);
   const f2 = getFighter(m.fighter2Id);
+
+  // Apply Warrior LP scaling from round wins
+  [f1, f2].forEach(f => {
+    if (f.avatar === 'warrior' && m.warriorLpBonus[f.id]) {
+      f.maxLp = WARRIOR_MAX_LP + m.warriorLpBonus[f.id];
+    }
+  });
+
   f1.lp = f1.maxLp;
   f2.lp = f2.maxLp;
   m.round++;
@@ -481,9 +733,10 @@ function startNextRound() {
   m.assassinActive = false;
   m.attackValue = 0;
   m.attackRoll  = 0;
-  m.phase = 'attack_coin';
+  m.stances     = {};
+  m.ultFlags    = {};  // clear round/turn ult flags; ultUsed persists
+  m.phase = 'declare_1';
   m.log = [];
-  addLog(`⚔️  Round ${m.round} — BEGIN!`, 'system');
 }
 
 function getMatchWinnerId() {

@@ -376,6 +376,121 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
 .fighter-tag { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .tag-avatar  { font-size: 1.1rem; }
 
+/* ── Avatar passive label in setup ──────────────────────────── */
+.av-passive {
+  font-size: 0.58rem; font-weight: 700; letter-spacing: 0.02em;
+  text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Stance badge ────────────────────────────────────────────── */
+.stance-badge { font-style: italic; }
+
+/* ── Log types ───────────────────────────────────────────────── */
+.log-line.passive  { color: #a78bfa; }
+.log-line.stance   { color: #60a5fa; font-weight: 700; }
+.log-line.ultimate { color: var(--gold); font-weight: 700; letter-spacing: 0.02em; }
+
+/* ── Ultimate readiness indicator in fighter panel ───────────── */
+.ult-indicator {
+  margin-top: 6px;
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.ult-used { color: var(--muted2); }
+
+/* ── Action button group (action + optional ultimate) ────────── */
+.action-btns {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%;
+}
+
+/* ── Ultimate button ─────────────────────────────────────────── */
+.btn-ult {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px 22px; border-radius: var(--radius);
+  font-family: inherit; font-size: 0.88rem; font-weight: 700; letter-spacing: 0.04em;
+  cursor: pointer; transition: all 0.18s;
+  background: rgba(0,0,0,0.35);
+  border: 2px solid var(--ult-col, #fff);
+  color: var(--ult-col, #fff);
+}
+.btn-ult:hover {
+  background: color-mix(in srgb, var(--ult-col, #fff) 15%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--ult-col, #fff) 35%, transparent);
+  transform: translateY(-1px);
+}
+.ult-tag {
+  font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 10px;
+  border: 1px solid currentColor; opacity: 0.8;
+}
+
+/* ── Explosion badge on dice ─────────────────────────────────── */
+.big-dice { position: relative; }
+.explosion-badge {
+  position: absolute; top: -8px; right: -8px;
+  background: var(--gold); color: #000;
+  border-radius: 12px; font-size: 0.65rem; font-weight: 800;
+  padding: 2px 7px; letter-spacing: 0.04em;
+  animation: popIn 0.3s cubic-bezier(0.17, 0.67, 0.3, 1.4);
+}
+@keyframes popIn {
+  0%   { transform: scale(0); }
+  100% { transform: scale(1); }
+}
+
+/* ── Declare screen ──────────────────────────────────────────── */
+.declare-screen {
+  width: 100%; max-width: 700px;
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding: 10px 0;
+}
+.declare-lookaway {
+  font-size: 0.8rem; color: var(--muted); text-align: center;
+  padding: 8px 16px; border-radius: var(--radius);
+  background: var(--bg2); border: 1px solid var(--border);
+}
+.declare-prompt {
+  font-size: 1.15rem; font-weight: 700; text-align: center;
+}
+
+/* ── Stance option cards ─────────────────────────────────────── */
+.stance-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  width: 100%; max-width: 540px;
+}
+.stance-option {
+  padding: 18px 14px; border-radius: var(--radius);
+  background: var(--bg2); border: 2px solid transparent;
+  cursor: pointer; text-align: center; transition: all 0.18s;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.stance-option:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+.stance-opt-icon { font-size: 1.8rem; }
+.stance-opt-name { font-size: 0.9rem; font-weight: 700; }
+.stance-opt-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+
+/* ── Declare reveal screen ───────────────────────────────────── */
+.declare-reveal {
+  width: 100%; max-width: 700px;
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+  padding: 10px;
+}
+.declare-reveal-title {
+  font-size: 1.2rem; font-weight: 800; color: #fff; letter-spacing: 0.04em;
+}
+.declare-reveal-row {
+  display: flex; align-items: center; gap: 16px; width: 100%; max-width: 560px; flex-wrap: wrap; justify-content: center;
+}
+.declare-reveal-card {
+  flex: 1; min-width: 190px; padding: 18px 16px; border-radius: var(--radius);
+  background: var(--bg2); border: 2px solid transparent;
+  text-align: center; display: flex; flex-direction: column; gap: 8px;
+}
+.declare-vs { font-size: 1rem; font-weight: 800; color: var(--muted); flex-shrink: 0; }
+.declare-rev-name   { font-size: 0.88rem; color: var(--muted); }
+.declare-rev-stance { font-size: 1rem; font-weight: 700; }
+.declare-rev-desc   { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 520px) {
   .fighters-row { grid-template-columns: 1fr; }
@@ -384,4 +499,6 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
   .btn-large { font-size: 0.9rem; padding: 13px 24px; }
   .mode-card { min-width: 200px; }
   .bracket-wrap { flex-direction: column; }
+  .stance-grid { grid-template-columns: 1fr; }
+  .declare-reveal-row { flex-direction: column; }
 }
