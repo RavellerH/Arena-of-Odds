@@ -1,6 +1,28 @@
 // ui.js — Screen rendering and event handling
 
-const DICE_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+const DICE_FACES = ['', '1', '2', '3', '4', '5', '6'];
+const DIE_PIPS = {
+  1: ['mid-center'],
+  2: ['top-left', 'bottom-right'],
+  3: ['top-left', 'mid-center', 'bottom-right'],
+  4: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+  5: ['top-left', 'top-right', 'mid-center', 'bottom-left', 'bottom-right'],
+  6: ['top-left', 'top-right', 'mid-left', 'mid-right', 'bottom-left', 'bottom-right'],
+};
+const PREFS_KEY = 'aoo_prefs';
+const KENNEY_ICON_DIR = 'assets/vendor/kenney/board-game-icons/PNG/Default%20(64px)';
+const QUICK_NAMES = ['Ash', 'Bolt', 'Cinder', 'Drift', 'Echo', 'Flux', 'Glint', 'Hex'];
+const MOTION_MODES = ['fast', 'normal', 'dramatic'];
+
+function loadPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(PREFS_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+const savedPrefs = loadPrefs();
 
 const uiState = {
   playerCount: 4,
@@ -17,9 +39,13 @@ const uiState = {
   attackExplosion: null,
   defendCoin: null,
   defendDice: null,
+  impact: null,
   isLeagueFinal: false,
   cupIsFinal: false,
   autoMode: false,
+  motionMode: savedPrefs.motionMode || 'normal',
+  soundOn: savedPrefs.soundOn !== false,
+  shakeOn: savedPrefs.shakeOn !== false,
 };
 
 // ── Screen manager ────────────────────────────────────────────────────────────
@@ -29,10 +55,85 @@ function showScreen(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
   window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  applyPrefs();
 }
 
 function setHTML(id, html) {
   document.getElementById(id).innerHTML = html;
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      motionMode: uiState.motionMode,
+      soundOn: uiState.soundOn,
+      shakeOn: uiState.shakeOn,
+    }));
+  } catch (e) {}
+}
+
+function applyPrefs() {
+  if (!document.body) return;
+  document.body.classList.remove('motion-fast', 'motion-normal', 'motion-dramatic');
+  document.body.classList.add(`motion-${uiState.motionMode}`);
+  document.body.classList.toggle('shake-enabled', uiState.shakeOn);
+}
+
+function renderSettingsStrip() {
+  return `<div class="settings-strip">
+    <div class="segmented" aria-label="Animation speed">
+      ${MOTION_MODES.map(mode => `<button class="${uiState.motionMode === mode ? 'active' : ''}" onclick="setMotionMode('${mode}')">${mode}</button>`).join('')}
+    </div>
+    <button class="icon-toggle ${uiState.soundOn ? 'active' : ''}" onclick="toggleSound()" title="Sound">${uiState.soundOn ? 'Sound On' : 'Sound Off'}</button>
+    <button class="icon-toggle ${uiState.shakeOn ? 'active' : ''}" onclick="toggleShake()" title="Screen shake">${uiState.shakeOn ? 'Shake On' : 'Shake Off'}</button>
+  </div>`;
+}
+
+function assetIcon(file, label = '') {
+  return `<img class="asset-icon" src="${KENNEY_ICON_DIR}/${file}" alt="${escapeHtml(label)}" loading="lazy">`;
+}
+
+function pveStageIcon(stage, extraClass = '') {
+  const files = {
+    goblin: 'cards_skull.png',
+    troll: 'shield.png',
+    witch: 'book_closed.png',
+    warlord: 'sword.png',
+    lichking: 'skull.png',
+  };
+  const file = files[stage.id] || 'award.png';
+  return `<img class="pve-stage-asset ${extraClass}" src="${KENNEY_ICON_DIR}/${file}" alt="${escapeHtml(stage.name)}" loading="lazy">`;
+}
+
+function setMotionMode(mode) {
+  if (!MOTION_MODES.includes(mode)) return;
+  uiState.motionMode = mode;
+  savePrefs();
+  applyPrefs();
+  rerenderCurrentScreen();
+}
+
+function toggleSound() {
+  uiState.soundOn = !uiState.soundOn;
+  savePrefs();
+  applyPrefs();
+  if (uiState.soundOn) playSfx('good');
+  rerenderCurrentScreen();
+}
+
+function toggleShake() {
+  uiState.shakeOn = !uiState.shakeOn;
+  savePrefs();
+  applyPrefs();
+  rerenderCurrentScreen();
+}
+
+function rerenderCurrentScreen() {
+  const activeId = document.querySelector('.screen.active')?.id;
+  if (activeId === 'screen-menu') renderMenu();
+  else if (activeId === 'screen-fight' && gameState.currentMatch) rerenderFight();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -90,6 +191,113 @@ function renderHpBar(lp, maxLp = MAX_LP) {
     </div>`;
 }
 
+function fighterAccentColor(fighter) {
+  return (ULTIMATES[fighter.avatar] && ULTIMATES[fighter.avatar].color)
+    || (AVATAR_PASSIVES[fighter.avatar] && AVATAR_PASSIVES[fighter.avatar].color)
+    || skillData(fighter.skill).color
+    || '#22d3ee';
+}
+
+function renderDieFace(value, extraClass = '') {
+  const pips = DIE_PIPS[value] || [];
+  if (!pips.length) {
+    return `<span class="die-face die-pending ${extraClass}" aria-label="die pending"><span class="die-mark">?</span></span>`;
+  }
+  return `<span class="die-face die-${value} ${extraClass}" aria-label="die ${value}">
+    ${pips.map(pos => `<span class="die-pip ${pos}"></span>`).join('')}
+  </span>`;
+}
+
+function setImpact(kind, title, detail = '') {
+  uiState.impact = { kind, title, detail };
+}
+
+let audioCtx = null;
+function playSfx(kind) {
+  if (!uiState.soundOn) return;
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    audioCtx = audioCtx || new AudioContextClass();
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const tones = {
+      good: [520, 0.08, 'triangle'],
+      bad: [160, 0.10, 'sawtooth'],
+      hit: [110, 0.13, 'square'],
+      block: [340, 0.08, 'triangle'],
+      special: [720, 0.14, 'triangle'],
+      click: [280, 0.04, 'sine'],
+    };
+    const [freq, dur, type] = tones[kind] || tones.click;
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    if (kind === 'special') osc.frequency.exponentialRampToValueAtTime(freq * 1.45, now + dur);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + dur + 0.02);
+  } catch (e) {}
+}
+
+function triggerShake(kind = 'hit') {
+  if (!uiState.shakeOn) return;
+  document.body.classList.remove('screen-shake', 'screen-shake-strong');
+  void document.body.offsetWidth;
+  document.body.classList.add(kind === 'special' || kind === 'hit' ? 'screen-shake-strong' : 'screen-shake');
+  setTimeout(() => document.body.classList.remove('screen-shake', 'screen-shake-strong'), 420);
+}
+
+function renderImpactBanner() {
+  const impact = uiState.impact;
+  if (!impact) return '';
+  return `<div class="impact-banner ${impact.kind}">
+    <div class="impact-title">${escapeHtml(impact.title)}</div>
+    ${impact.detail ? `<div class="impact-detail">${escapeHtml(impact.detail)}</div>` : ''}
+  </div>`;
+}
+
+function firstNewLog(beforeCount) {
+  const m = gameState.currentMatch;
+  return m.log.slice(0, Math.max(0, m.log.length - beforeCount));
+}
+
+function renderRoundSummary(m, f1, f2) {
+  const stats = m.roundStats;
+  if (!stats) return '';
+  const s1 = stats.fighters && stats.fighters[f1.id] ? stats.fighters[f1.id] : { damageDealt: 0, blocks: 0, ultUsed: false };
+  const s2 = stats.fighters && stats.fighters[f2.id] ? stats.fighters[f2.id] : { damageDealt: 0, blocks: 0, ultUsed: false };
+  const winner = stats.winnerId ? getFighter(stats.winnerId) : null;
+  const biggest = stats.biggestHit;
+  const biggestText = biggest
+    ? `${escapeHtml(getFighter(biggest.attackerId)?.name || 'Fighter')} hit ${escapeHtml(getFighter(biggest.defenderId)?.name || 'opponent')} for ${biggest.damage}`
+    : 'No damage landed';
+
+  return `<div class="round-summary">
+    <div class="summary-kicker">Round ${stats.round} Summary</div>
+    <div class="summary-winner">${winner ? `${avatarIcon(winner.avatar)} ${escapeHtml(winner.name)} wins the round` : 'Round ends in a draw'}</div>
+    <div class="summary-grid">
+      <div class="summary-fighter">
+        <span>${avatarIcon(f1.avatar)} ${escapeHtml(f1.name)}</span>
+        <strong>${s1.damageDealt}</strong><small>damage</small>
+        <strong>${s1.blocks}</strong><small>blocks</small>
+        <em>${s1.ultUsed ? 'Ult used' : 'Ult held'}</em>
+      </div>
+      <div class="summary-fighter">
+        <span>${avatarIcon(f2.avatar)} ${escapeHtml(f2.name)}</span>
+        <strong>${s2.damageDealt}</strong><small>damage</small>
+        <strong>${s2.blocks}</strong><small>blocks</small>
+        <em>${s2.ultUsed ? 'Ult used' : 'Ult held'}</em>
+      </div>
+    </div>
+    <div class="summary-biggest">Biggest hit: ${biggestText}</div>
+  </div>`;
+}
+
 function escapeHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -103,6 +311,7 @@ function clearFightDisplay() {
   uiState.attackExplosion = null;
   uiState.defendCoin = null;
   uiState.defendDice = null;
+  uiState.impact = null;
 }
 
 // ── MENU ──────────────────────────────────────────────────────────────────────
@@ -117,10 +326,12 @@ function renderMenu() {
     </div>
     <div class="menu-buttons">
       ${continueBtn}
-      <button class="btn btn-primary btn-large" onclick="goNewGame()">New Game</button>
-      <button class="btn btn-secondary"         onclick="startPveSetup()">⚔️ PVE Campaign</button>
-      <button class="btn btn-secondary"         onclick="goHowToPlay()">How to Play</button>
+      <button class="btn btn-primary btn-large" onclick="goNewGame()">${assetIcon('cards_stack.png', '')} New Game</button>
+      <button class="btn btn-gold"              onclick="quickStartGame()">${assetIcon('award.png', '')} Quick Start</button>
+      <button class="btn btn-secondary"         onclick="startPveSetup()">${assetIcon('sword.png', '')} PVE Campaign</button>
+      <button class="btn btn-secondary"         onclick="goHowToPlay()">${assetIcon('book_open.png', '')} How to Play</button>
     </div>
+    ${renderSettingsStrip()}
     <p class="subtitle">Coin · Dice · Duel &nbsp;·&nbsp; 4–8 Players</p>
   `);
   showScreen('screen-menu');
@@ -565,8 +776,8 @@ function renderFight(matchTitle, context) {
     if (uiState.attackCoin === 'heads')
       chips += `<span class="ctx-chip heads">⚔️ HEADS</span>`;
     if (uiState.attackDice) {
-      const d1f = uiState.attackDie1 ? DICE_FACES[uiState.attackDie1] : '🎲';
-      const d2f = uiState.attackDie2 ? DICE_FACES[uiState.attackDie2] : '🎲';
+      const d1f = uiState.attackDie1 ? DICE_FACES[uiState.attackDie1] : '?';
+      const d2f = uiState.attackDie2 ? DICE_FACES[uiState.attackDie2] : '?';
       let diceLabel = `⚔️ ${d1f}+${d2f}=${uiState.attackDice}`;
       if (uiState.attackExplosion) diceLabel += ` 💥+${uiState.attackExplosion}`;
       if (uiState.attackIsDoubles) diceLabel += ` ⚡Doubles!`;
@@ -605,15 +816,15 @@ function renderFight(matchTitle, context) {
   } else if (isDicePhase) {
     if (phase === 'attack_roll') {
       const hasRolled = !!uiState.attackDice;
-      const d1f = uiState.attackDie1 ? DICE_FACES[uiState.attackDie1] : '🎲';
-      const d2f = uiState.attackDie2 ? DICE_FACES[uiState.attackDie2] : '🎲';
+      const d1f = uiState.attackDie1 || null;
+      const d2f = uiState.attackDie2 || null;
       const sumDisplay = uiState.attackDice || '?';
       const explosion = uiState.attackExplosion;
       const pairCls = hasRolled ? 'rolled' : '';
       mainEl = `<div class="big-dice-pair ${pairCls}" id="fight-dice">
-        <div class="big-dice-face">${d1f}</div>
+        ${renderDieFace(d1f, 'die-large')}
         <div class="big-dice-sep">+</div>
-        <div class="big-dice-face">${d2f}</div>
+        ${renderDieFace(d2f, 'die-large')}
         <div class="big-dice-sep">=</div>
         <div class="big-dice-total">${sumDisplay}${explosion ? `<span class="explosion-badge">+${explosion}</span>` : ''}</div>
         ${uiState.attackIsDoubles && hasRolled ? '<div class="doubles-badge">⚡ Doubles!</div>' : ''}
@@ -621,25 +832,24 @@ function renderFight(matchTitle, context) {
     } else {
       const rawDice = uiState.defendDice;
       const displayDice = rawDice ? Math.min(rawDice, 6) : null;
-      const diceFace = displayDice ? DICE_FACES[displayDice] : '🎲';
       const diceCls = rawDice ? 'rolled' : '';
-      mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${diceFace}</div>`;
+      mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${renderDieFace(displayDice, 'die-large')}</div>`;
     }
     roleLabel   = phase === 'attack_roll' ? '⚔️ ATTACKER' : '🛡️ DEFENDER';
     actionLabel = phase === 'attack_roll' ? 'Roll your attack dice' : 'Roll your defense dice';
     actionBtn = `<button class="btn-action-circle btn-primary${bossActing ? ' pulsing' : ''}" onclick="handleFightAction()" ${bossActing ? 'disabled' : ''}>
-      <span class="btn-action-icon">🎲</span>
+      <span class="btn-action-icon">${renderDieFace(null, 'die-button')}</span>
       <span class="btn-action-label">${bossActing ? '…' : escapeHtml(actor.name).slice(0, 9)}</span>
     </button>`;
 
   } else if (phase === 'round_end') {
-    mainEl      = `<div class="phase-icon">🏁</div>`;
+    mainEl      = `<div class="phase-icon phase-end">✓</div>`;
     roleLabel   = `Round ${m.round} Complete`;
     actionLabel = 'Ready for the next round?';
     actionBtn   = `<button class="btn btn-secondary btn-large" onclick="handleFightAction()">Next Round →</button>`;
 
   } else {
-    mainEl      = `<div class="phase-icon">🏆</div>`;
+    mainEl      = `<div class="phase-icon phase-win">WIN</div>`;
     roleLabel   = 'Match Over';
     actionLabel = 'See who won this match';
     actionBtn   = `<button class="btn btn-gold btn-large" onclick="handleFightAction()">View Results →</button>`;
@@ -661,11 +871,15 @@ function renderFight(matchTitle, context) {
   const f1Active = activeId === f1.id ? 'active-panel' : '';
   const f2Active = activeId === f2.id ? 'active-panel' : '';
   const logHtml  = m.log.map(e => `<div class="log-line ${e.type}">${e.text}</div>`).join('');
+  const impactHtml = renderImpactBanner();
+  const roundSummaryHtml = isEndPhase ? renderRoundSummary(m, f1, f2) : '';
 
   const f1Ready   = !m.ultReady || m.ultReady[f1.id];
   const f2Ready   = !m.ultReady || m.ultReady[f2.id];
   const f1Charges = (m.ultCharges && m.ultCharges[f1.id]) || 0;
   const f2Charges = (m.ultCharges && m.ultCharges[f2.id]) || 0;
+  const f1Needed = getUltRechargeNeeded(f1);
+  const f2Needed = getUltRechargeNeeded(f2);
   const u1 = ULTIMATES[f1.avatar];
   const u2 = ULTIMATES[f2.avatar];
 
@@ -674,12 +888,15 @@ function renderFight(matchTitle, context) {
       <span class="match-title">${escapeHtml(matchTitle || 'Match')}</span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="round-info">Round ${m.round} / ${maxRounds}</span>
+        <button class="btn-mini" onclick="setMotionMode('${uiState.motionMode === 'fast' ? 'normal' : uiState.motionMode === 'normal' ? 'dramatic' : 'fast'}')" title="Animation speed">${uiState.motionMode}</button>
+        <button class="btn-mini ${uiState.soundOn ? 'active' : ''}" onclick="toggleSound()" title="Sound">${uiState.soundOn ? 'SFX' : 'Mute'}</button>
+        <button class="btn-mini ${uiState.shakeOn ? 'active' : ''}" onclick="toggleShake()" title="Screen shake">${uiState.shakeOn ? 'Shake' : 'Still'}</button>
         <button class="btn-info" onclick="showInfoPanel()" title="Skills Guide">?</button>
       </div>
     </div>
 
     <div class="fighters-row">
-      <div class="fighter-panel ${f1Active}">
+      <div class="fighter-panel ${f1Active}" style="--fighter-col:${fighterAccentColor(f1)}">
         <div class="fighter-name-row">
           <span class="fighter-avatar">${avatarIcon(f1.avatar)}</span>
           <span class="fighter-name">${escapeHtml(f1.name)}</span>
@@ -692,10 +909,10 @@ function renderFight(matchTitle, context) {
           ${renderStanceBadge(m.stances[f1.id])}
         </div>
         ${u1 ? `<div class="ult-indicator clickable ${f1Ready ? 'ult-ready' : 'ult-charging'}" style="${f1Ready ? `color:${u1.color}` : ''}" onclick="showSkillPopup('ult','${f1.avatar}')">
-          ${f1Ready ? `${u1.icon} Ult Ready` : `⚡ ${'●'.repeat(f1Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f1Charges)} Charging`}
+          ${f1Ready ? `${u1.icon} Ult Ready` : `⚡ ${'●'.repeat(f1Charges)}${'○'.repeat(Math.max(0, f1Needed - f1Charges))} Charging`}
         </div>` : ''}
       </div>
-      <div class="fighter-panel ${f2Active}">
+      <div class="fighter-panel ${f2Active}" style="--fighter-col:${fighterAccentColor(f2)}">
         <div class="fighter-name-row">
           <span class="fighter-avatar">${avatarIcon(f2.avatar)}</span>
           <span class="fighter-name">${escapeHtml(f2.name)}</span>
@@ -708,7 +925,7 @@ function renderFight(matchTitle, context) {
           ${renderStanceBadge(m.stances[f2.id])}
         </div>
         ${u2 ? `<div class="ult-indicator clickable ${f2Ready ? 'ult-ready' : 'ult-charging'}" style="${f2Ready ? `color:${u2.color}` : ''}" onclick="showSkillPopup('ult','${f2.avatar}')">
-          ${f2Ready ? `${u2.icon} Ult Ready` : `⚡ ${'●'.repeat(f2Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f2Charges)} Charging`}
+          ${f2Ready ? `${u2.icon} Ult Ready` : `⚡ ${'●'.repeat(f2Charges)}${'○'.repeat(Math.max(0, f2Needed - f2Charges))} Charging`}
         </div>` : ''}
       </div>
     </div>
@@ -722,7 +939,9 @@ function renderFight(matchTitle, context) {
 
       <div class="ctx-chips">${chips}</div>
 
+      ${impactHtml}
       ${mainEl}
+      ${roundSummaryHtml}
 
       <div class="action-btns">
         ${ultBtn}
@@ -746,31 +965,77 @@ function handleFightAction() {
   if (phase === 'attack_coin') {
     clearFightDisplay();
     const { coin, reroll, shadowBlitz } = doAttackCoin();
-    uiState.attackCoin = shadowBlitz ? 'heads' : (reroll !== undefined ? reroll : coin);
+    const finalCoin = shadowBlitz ? 'heads' : (reroll !== undefined ? reroll : coin);
+    uiState.attackCoin = finalCoin;
+    if (shadowBlitz) {
+      setImpact('special', 'Attack coin bypassed', 'Shadow Blitz counts as HEADS.');
+      playSfx('special');
+    } else if (finalCoin === 'heads') {
+      setImpact('good', 'HEADS: attack continues', reroll !== undefined ? 'Gambler reroll recovered the turn.' : 'Roll attack dice next.');
+      playSfx('good');
+    } else {
+      setImpact('bad', 'TAILS: turn lost', reroll !== undefined ? 'Reroll also failed; ultimate charge gained.' : 'Attack fails and the turn passes.');
+      playSfx('bad');
+    }
     rerenderFight();
     animateEl('fight-coin', 'flip-anim');
 
   } else if (phase === 'attack_roll') {
-    const { roll, die1, die2, explosionBonus, isDoubles } = doAttackRoll();
+    const { roll, die1, die2, attackValue, explosionBonus, isDoubles } = doAttackRoll();
     uiState.attackDice = roll;
     uiState.attackDie1 = die1;
     uiState.attackDie2 = die2;
     uiState.attackIsDoubles = isDoubles || false;
     uiState.attackExplosion = explosionBonus || null;
+    const attackTotal = attackValue || (roll + (explosionBonus || 0));
+    if (explosionBonus) {
+      setImpact('special', `Explosion: attack ${attackTotal}`, `${die1}+${die2} triggered +${explosionBonus} bonus.`);
+      playSfx('special');
+      triggerShake('special');
+    } else if (isDoubles) {
+      setImpact('special', `Doubles: attack ${attackTotal}`, `${die1}+${die2} primes Double Strike.`);
+      playSfx('special');
+    } else {
+      setImpact('good', `Attack value ${attackTotal}`, `${die1}+${die2}; defender coin next.`);
+      playSfx('good');
+    }
     rerenderFight();
     animateEl('fight-dice', 'roll-anim');
 
   } else if (phase === 'defend_coin') {
     const result = doDefendCoin();
-    uiState.defendCoin = (result.eagleEye || result.shadowBlitz) ? 'tails' : result.coin;
+    const finalCoin = (result.eagleEye || result.shadowBlitz) ? 'tails' : result.coin;
+    uiState.defendCoin = finalCoin;
     if (m.phase !== 'defend_roll') clearFightDisplay();
+    if (finalCoin === 'heads') {
+      setImpact('block', 'HEADS: block chance', 'Roll defense dice to stop the hit.');
+      playSfx('block');
+    } else {
+      setImpact('hit', 'TAILS: defense fails', (m.log[0] && m.log[0].type === 'damage') ? m.log[0].text : 'Full damage goes through.');
+      playSfx('hit');
+      triggerShake('hit');
+    }
     rerenderFight();
     animateEl('fight-coin', 'flip-anim');
 
   } else if (phase === 'defend_roll') {
-    const { roll } = doDefendRoll();
+    const result = doDefendRoll();
+    const { roll } = result;
     uiState.defendDice = roll;
     if (m.phase === 'attack_coin') clearFightDisplay();
+    if (result.ironGuard) {
+      setImpact('special', 'Iron Guard!', 'Attack negated and reflected.');
+      playSfx('special');
+      triggerShake('special');
+    } else if (result.blocked) {
+      setImpact('block', 'Blocked!', result.counter ? `Counter dealt ${result.counter} damage.` : `${roll} stopped the attack.`);
+      playSfx('block');
+      if (result.counter) triggerShake('hit');
+    } else {
+      setImpact('hit', `${result.damage || 0} damage`, m.log[0] ? m.log[0].text : 'Hit lands.');
+      playSfx('hit');
+      triggerShake('hit');
+    }
     rerenderFight();
     animateEl('fight-dice', 'roll-anim');
 
@@ -785,8 +1050,27 @@ function handleFightAction() {
 }
 
 function useUltimate() {
+  const m = gameState.currentMatch;
+  const attacker = getAttacker();
+  const ult = ULTIMATES[attacker.avatar];
   doUltimate();
+  if (ult) setImpact('special', `${ult.name} unleashed`, ult.timing);
+  playSfx('special');
+  triggerShake('special');
   rerenderFight();
+}
+
+function quickStartGame() {
+  clearSave();
+  clearPveProgress();
+  uiState.autoMode = false;
+  uiState.setupFighters = [];
+  const avatarPool = [...AVATARS].sort(() => Math.random() - 0.5);
+  const skillPool = [...SKILL_IDS].sort(() => Math.random() - 0.5);
+  gameState.fighters = avatarPool.slice(0, 4).map((av, idx) => {
+    return createFighter(QUICK_NAMES[idx], av.id, skillPool[idx % skillPool.length]);
+  });
+  startLeague();
 }
 
 function rerenderFight() {
@@ -801,7 +1085,9 @@ function animateEl(id, cls) {
   el.classList.remove(cls);
   void el.offsetWidth;
   el.classList.add(cls);
-  setTimeout(() => el.classList.remove(cls), 700);
+  const clear = () => el.classList.remove(cls);
+  el.addEventListener('animationend', clear, { once: true });
+  setTimeout(clear, 1200);
 }
 
 // ── MATCH RESULT ──────────────────────────────────────────────────────────────
@@ -1128,7 +1414,7 @@ function confirmFighterPve() {
 }
 
 function renderPveCamp() {
-  const pve = gameState.pve;
+  const pve = ensurePveDefaults();
   const player = gameState.fighters.find(f => f.id === pve.playerId);
   const stageIdx = pve.stageIdx;
   const stage = PVE_STAGES[stageIdx];
@@ -1159,6 +1445,10 @@ function renderPveCamp() {
     const item = PVE_SHOP_ITEMS.find(i => i.id === id);
     return item ? `<span class="pve-upgrade-tag">${item.icon} ${item.name}</span>` : '';
   }).join('');
+  const relicList = (pve.relics || []).map(id => {
+    const relic = PVE_RELICS.find(r => r.id === id);
+    return relic ? `<span class="pve-relic-tag" title="${escapeHtml(relic.desc)}">${relic.icon} ${relic.name}</span>` : '';
+  }).join('');
 
   saveGame('pve_camp');
 
@@ -1170,7 +1460,7 @@ function renderPveCamp() {
       </div>
 
       <div class="card" style="text-align:center;padding:20px;max-width:440px;width:100%">
-        <div class="pve-boss-icon">${stage.icon}</div>
+        <div class="pve-boss-icon">${pveStageIcon(stage, 'large')}</div>
         <h2 style="margin:8px 0 4px">${stage.name}</h2>
         <div class="pve-lore">${stage.lore}</div>
         <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:10px">
@@ -1187,11 +1477,12 @@ function renderPveCamp() {
         </div>
         ${renderSkillBadge(player.skill)}${extraSkillHtml ? ' ' + extraSkillHtml : ''}
         ${upgradeList ? `<div class="pve-upgrades" style="margin-top:8px">${upgradeList}</div>` : ''}
+        ${relicList ? `<div class="pve-relics">${relicList}</div>` : ''}
       </div>
 
       <div class="btn-row">
         <button class="btn btn-secondary" onclick="renderPveShop()">🛒 Shop</button>
-        <button class="btn btn-gold btn-large" onclick="launchPveMatch()">⚔️ Fight ${stage.name}!</button>
+        <button class="btn btn-gold btn-large" onclick="launchPveMatch()">${assetIcon('sword.png', '')} Fight ${stage.name}!</button>
       </div>
       <button class="btn btn-secondary" style="margin-top:4px" onclick="renderMenu()">← Main Menu</button>
     </div>
@@ -1200,7 +1491,7 @@ function renderPveCamp() {
 }
 
 function renderPveShop() {
-  const pve = gameState.pve;
+  const pve = ensurePveDefaults();
   const player = gameState.fighters.find(f => f.id === pve.playerId);
   const dualWieldBought = pve.purchases.includes('dual_wield');
 
@@ -1244,7 +1535,7 @@ function renderPveShop() {
 }
 
 function renderPveDualWieldPicker() {
-  const pve = gameState.pve;
+  const pve = ensurePveDefaults();
   const player = gameState.fighters.find(f => f.id === pve.playerId);
   const availableSkills = SKILL_IDS.filter(id => id !== player.skill);
 
@@ -1286,7 +1577,7 @@ function launchPveMatch() {
 }
 
 function continuePveAfterMatch() {
-  const pve = gameState.pve;
+  const pve = ensurePveDefaults();
   const winnerId = cupTiebreak(); // reuse tiebreak logic
   const playerWon = winnerId === pve.playerId;
 
@@ -1296,13 +1587,14 @@ function continuePveAfterMatch() {
     pve.stageIdx++;
     pve.intelActive = false;
     pve.purchases = pve.purchases.filter(id => id !== 'monster_intel' && id !== 'revive');
+    pve.pendingRelicChoices = pve.stageIdx < PVE_STAGES.length ? pickPveRelicChoices(3) : [];
     savePveProgress();
   }
   renderPveMatchResult(playerWon);
 }
 
 function renderPveMatchResult(playerWon) {
-  const pve = gameState.pve;
+  const pve = ensurePveDefaults();
   const player = gameState.fighters.find(f => f.id === pve.playerId);
   const m = gameState.currentMatch;
   const boss = getFighter(m.fighter1Id === pve.playerId ? m.fighter2Id : m.fighter1Id);
@@ -1311,6 +1603,23 @@ function renderPveMatchResult(playerWon) {
   const playerRw = m.fighter1Id === pve.playerId ? f1rw : f2rw;
   const bossRw = m.fighter1Id === pve.playerId ? f2rw : f1rw;
   const stage = PVE_STAGES[playerWon ? pve.stageIdx - 1 : pve.stageIdx];
+
+  const relicChoiceHtml = playerWon && pve.pendingRelicChoices && pve.pendingRelicChoices.length
+    ? `<div class="pve-relic-choice">
+        <div class="summary-kicker">Choose a relic</div>
+        <div class="pve-relic-options">
+          ${pve.pendingRelicChoices.map(id => {
+            const relic = PVE_RELICS.find(r => r.id === id);
+            if (!relic) return '';
+            return `<button class="pve-relic-option" onclick="handlePveChooseRelic('${relic.id}')">
+              <span>${relic.icon}</span>
+              <strong>${relic.name}</strong>
+              <small>${relic.desc}</small>
+            </button>`;
+          }).join('')}
+        </div>
+      </div>`
+    : '';
 
   setHTML('screen-result', `
     <div style="width:100%;max-width:440px;display:flex;flex-direction:column;gap:20px;text-align:center">
@@ -1326,12 +1635,13 @@ function renderPveMatchResult(playerWon) {
         <div style="color:var(--muted);align-self:center;font-size:0.8rem">rounds</div>
         <div>
           <div style="font-size:1.8rem;font-weight:800">${bossRw}</div>
-          <div style="font-size:0.75rem;color:var(--muted)">${stage.icon} ${boss.name}</div>
+          <div style="font-size:0.75rem;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:4px">${pveStageIcon(stage, 'tiny')} ${boss.name}</div>
         </div>
       </div>
       <div class="pve-credits" style="font-size:1rem">💰 Credits: ${pve.credits}</div>
+      ${relicChoiceHtml}
       ${playerWon
-        ? `<button class="btn btn-gold btn-large" onclick="renderPveCamp()">Continue →</button>`
+        ? (relicChoiceHtml ? '' : `<button class="btn btn-gold btn-large" onclick="renderPveCamp()">Continue →</button>`)
         : `<div class="btn-row">
             <button class="btn btn-primary" onclick="restartPveCampaign()">Try Again</button>
             <button class="btn btn-secondary" onclick="renderMenu()">Main Menu</button>
@@ -1339,6 +1649,10 @@ function renderPveMatchResult(playerWon) {
     </div>
   `);
   showScreen('screen-result');
+}
+
+function handlePveChooseRelic(relicId) {
+  if (pveChooseRelic(relicId)) renderPveCamp();
 }
 
 function restartPveCampaign() {

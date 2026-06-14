@@ -58,7 +58,7 @@ const AVATAR_PASSIVES = {
   mage: {
     name: 'Spellpower',
     icon: '✨',
-    color: '#818cf8',
+    color: '#2dd4bf',
     description: `First attack sum ≥9 this round adds +${MAGE_SPELLPOWER} bonus damage.`,
     type: 'once_round',
   },
@@ -100,7 +100,7 @@ const AVATAR_PASSIVES = {
   necromancer: {
     name: 'Life Drain',
     icon: '💉',
-    color: '#c084fc',
+    color: '#eab308',
     description: `First hit each round heals ${Math.round(NECRO_DRAIN_PCT * 100)}% of damage dealt (+ ${Math.round(NECRO_DRAIN_SCALE * 100)}%/round, max ${Math.round(NECRO_DRAIN_CAP * 100)}%).`,
     type: 'once_round',
   },
@@ -134,9 +134,9 @@ const SKILLS = {
   gamblers_edge: {
     id: 'gamblers_edge',
     name: "Gambler's Edge",
-    icon: '🎲',
-    color: '#a855f7',
-    glow: '#a855f788',
+    icon: '⚂︎',
+    color: '#fb7185',
+    glow: '#fb718588',
     description: 'Attack coin lands TAILS — reroll it once per round.',
   },
   mystic_heal: {
@@ -189,6 +189,33 @@ const PVE_SHOP_ITEMS = [
   { id: 'revive',       name: 'Phoenix Feather',icon: '🔥',  cost: 200, type: 'run',       desc: 'If you lose a round this match, restore to full LP once.' },
 ];
 
+const PVE_RELICS = [
+  {
+    id: 'lucky_token',
+    name: 'Lucky Token',
+    icon: '🪙',
+    desc: 'Once each round, your first attack coin TAILS flips into HEADS.',
+  },
+  {
+    id: 'volatile_dice',
+    name: 'Volatile Dice',
+    icon: '💥',
+    desc: 'Your attack rolls explode on 10+ instead of 11+.',
+  },
+  {
+    id: 'guardian_shell',
+    name: 'Guardian Shell',
+    icon: '◇',
+    desc: 'The first incoming hit each round is reduced by 20 damage.',
+  },
+  {
+    id: 'spark_core',
+    name: 'Spark Core',
+    icon: '⚡',
+    desc: 'Your ultimate recharges after 1 failed attack coin instead of 2.',
+  },
+];
+
 const ULTIMATES = {
   warrior: {
     name: 'Last Stand',
@@ -200,7 +227,7 @@ const ULTIMATES = {
   mage: {
     name: 'Arcane Surge',
     icon: '🌟',
-    color: '#818cf8',
+    color: '#2dd4bf',
     desc: 'Roll your attack dice 3 times this turn and take the highest sum.',
     timing: 'Turn Enhancement',
   },
@@ -242,7 +269,7 @@ const ULTIMATES = {
   necromancer: {
     name: 'Soul Steal',
     icon: '☠️',
-    color: '#c084fc',
+    color: '#eab308',
     desc: `Steal ${Math.round(ULT_SOUL_STEAL_PCT * 100)}% of opponent's current LP directly. Turn ends after.`,
     timing: 'Instant Attack',
   },

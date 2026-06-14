@@ -200,11 +200,62 @@ function startMatch(fighter1Id, fighter2Id, maxRounds) {
     attackIsDoubles: false,
     log: [],
     stances: {},
+    roundStats: createRoundStats(fighter1Id, fighter2Id, 1),
     ultReady:   { [fighter1Id]: true, [fighter2Id]: true },
     ultCharges: { [fighter1Id]: 0,    [fighter2Id]: 0    },
     ultFlags: {},
     warriorLpBonus: {},
   };
+}
+
+function createRoundStats(fighter1Id, fighter2Id, round) {
+  return {
+    round,
+    result: null,
+    winnerId: null,
+    biggestHit: null,
+    fighters: {
+      [fighter1Id]: { damageDealt: 0, blocks: 0, ultUsed: false },
+      [fighter2Id]: { damageDealt: 0, blocks: 0, ultUsed: false },
+    },
+  };
+}
+
+function ensureRoundStats(m) {
+  if (!m.roundStats) {
+    m.roundStats = createRoundStats(m.fighter1Id, m.fighter2Id, m.round);
+  }
+  return m.roundStats;
+}
+
+function recordDamageStat(attacker, defender, dmg, label = 'Hit') {
+  if (!dmg || dmg <= 0) return;
+  const m = gameState.currentMatch;
+  const stats = ensureRoundStats(m);
+  if (!stats.fighters[attacker.id]) stats.fighters[attacker.id] = { damageDealt: 0, blocks: 0, ultUsed: false };
+  stats.fighters[attacker.id].damageDealt += dmg;
+  if (!stats.biggestHit || dmg > stats.biggestHit.damage) {
+    stats.biggestHit = {
+      attackerId: attacker.id,
+      defenderId: defender.id,
+      damage: dmg,
+      label,
+    };
+  }
+}
+
+function recordBlockStat(defender) {
+  const m = gameState.currentMatch;
+  const stats = ensureRoundStats(m);
+  if (!stats.fighters[defender.id]) stats.fighters[defender.id] = { damageDealt: 0, blocks: 0, ultUsed: false };
+  stats.fighters[defender.id].blocks++;
+}
+
+function recordUltStat(fighter) {
+  const m = gameState.currentMatch;
+  const stats = ensureRoundStats(m);
+  if (!stats.fighters[fighter.id]) stats.fighters[fighter.id] = { damageDealt: 0, blocks: 0, ultUsed: false };
+  stats.fighters[fighter.id].ultUsed = true;
 }
 
 function addLog(text, type = 'normal') {
@@ -248,6 +299,7 @@ function doUltimate() {
 
   m.ultReady[attacker.id]   = false;
   m.ultCharges[attacker.id] = 0;
+  recordUltStat(attacker);
   addLog(`💥 ${attacker.name} unleashes ${ult.icon} ${ult.name}!`, 'ultimate');
 
   switch (av) {
@@ -275,6 +327,7 @@ function doUltimate() {
         if (absorbed > 0) addLog(`🛡️ Holy Shield absorbs ${absorbed}.`, 'passive');
       }
       defender.lp = Math.max(0, defender.lp - dmg);
+      recordDamageStat(attacker, defender, dmg, 'Divine Strike');
       addLog(`⚜️ Divine Strike! ${dmg} direct damage → ${defender.name} LP: ${defender.lp}`, 'damage');
       const endedP = checkRoundEnd();
       if (!endedP) passTurn();
@@ -303,6 +356,7 @@ function doUltimate() {
       const steal = Math.floor(defender.lp * ULT_SOUL_STEAL_PCT);
       defender.lp = Math.max(0, defender.lp - steal);
       attacker.lp = Math.min(attacker.maxLp, attacker.lp + steal);
+      recordDamageStat(attacker, defender, steal, 'Soul Steal');
       addLog(`☠️ Soul Steal! Drained ${steal} LP → ${defender.name}: ${defender.lp} | ${attacker.name}: ${attacker.lp}`, 'damage');
       const endedN = checkRoundEnd();
       if (!endedN) passTurn();
@@ -315,14 +369,20 @@ function doUltimate() {
 
 function chargeUltOnTails(attacker, m) {
   if (m.ultReady[attacker.id]) return; // already ready, nothing to do
+  const needed = getUltRechargeNeeded(attacker);
   m.ultCharges[attacker.id] = (m.ultCharges[attacker.id] || 0) + 1;
-  if (m.ultCharges[attacker.id] >= ULT_TAILS_TO_RECHARGE) {
+  if (m.ultCharges[attacker.id] >= needed) {
     m.ultReady[attacker.id] = true;
     m.ultCharges[attacker.id] = 0;
     addLog(`⚡ ${attacker.name}'s Ultimate recharged!`, 'ultimate');
   } else {
-    addLog(`⚡ Ult charging: ${m.ultCharges[attacker.id]}/${ULT_TAILS_TO_RECHARGE}`, 'passive');
+    addLog(`⚡ Ult charging: ${m.ultCharges[attacker.id]}/${needed}`, 'passive');
   }
+}
+
+function getUltRechargeNeeded(fighter) {
+  if (pveHasRelic('spark_core') && gameState.pve && fighter.id === gameState.pve.playerId) return 1;
+  return ULT_TAILS_TO_RECHARGE;
 }
 
 function doAttackCoin() {
@@ -368,10 +428,18 @@ function doAttackCoin() {
     return { coin };
   }
 
+  const luckyKey = attacker.id + '_lucky_token';
+  if (pveHasRelic('lucky_token') && gameState.pve && attacker.id === gameState.pve.playerId && !m.passiveUsed[luckyKey]) {
+    m.passiveUsed[luckyKey] = true;
+    addLog(`${attacker.name} flips — TAILS! 🪙 Lucky Token twists it into HEADS.`, 'passive');
+    m.phase = 'attack_roll';
+    return { coin: 'heads', relic: 'lucky_token' };
+  }
+
   if (fighterHasSkill(attacker, 'gamblers_edge') && !m.gamblerUsed[attacker.id]) {
     m.gamblerUsed[attacker.id] = true;
     const reroll = flipCoin();
-    addLog(`${attacker.name} flips — TAILS! 🎲 Gambler's Edge — rerolling...`, 'skill');
+    addLog(`${attacker.name} flips — TAILS! ⚂︎ Gambler's Edge — rerolling...`, 'skill');
     if (reroll === 'heads') {
       addLog(`Reroll: HEADS! Attack proceeds.`, 'heads');
       m.phase = 'attack_roll';
@@ -421,7 +489,10 @@ function doAttackRoll() {
   // Explosive roll: sum ≥ 11 adds a bonus d6 (~8% chance per roll)
   let roll = baseSum;
   let explosionBonus = 0;
-  if (baseSum >= EXPLOSION_TRIGGER) {
+  const explosionTrigger = pveHasRelic('volatile_dice') && gameState.pve && attacker.id === gameState.pve.playerId
+    ? EXPLOSION_TRIGGER - 1
+    : EXPLOSION_TRIGGER;
+  if (baseSum >= explosionTrigger) {
     explosionBonus = rollDice();
     roll = baseSum + explosionBonus;
     addLog(`💥 Explosion! ${baseSum} + ${explosionBonus} = ${roll} total attack value!`, 'passive');
@@ -539,6 +610,7 @@ function doDefendRoll() {
 
   // Iron Guard
   if (fighterHasSkill(defender, 'iron_guard') && roll === 6) {
+    recordBlockStat(defender);
     addLog(`${defender.name} rolls 6 — 🛡️ Iron Guard! Attack negated!`, 'skill');
     let reflectDmg = IRON_GUARD_REFLECT;
     if (attacker.avatar === 'paladin') {
@@ -555,6 +627,7 @@ function doDefendRoll() {
         addLog(`🗿 Last Stand! ${attacker.name} is immune to the reflect!`, 'ultimate');
       } else {
         attacker.lp = Math.max(0, attacker.lp - reflectDmg);
+        recordDamageStat(defender, attacker, reflectDmg, 'Iron Guard');
         addLog(`${attacker.name} takes ${reflectDmg} reflected damage → LP: ${attacker.lp}`, 'damage');
       }
     }
@@ -564,6 +637,7 @@ function doDefendRoll() {
   }
 
   if (roll >= m.attackValue) {
+    recordBlockStat(defender);
     addLog(`${defender.name} rolls ${roll} — BLOCKED! (${roll} ≥ ${m.attackValue})`, 'block');
 
     // Counter stance: deal damage on block
@@ -581,6 +655,7 @@ function doDefendRoll() {
         addLog(`🗿 Last Stand! ${attacker.name} blocks counter-damage!`, 'ultimate');
       } else if (counterDmg > 0) {
         attacker.lp = Math.max(0, attacker.lp - counterDmg);
+        recordDamageStat(defender, attacker, counterDmg, 'Counter');
         addLog(`🛡️ Counter! ${attacker.name} takes ${counterDmg} damage → LP: ${attacker.lp}`, 'stance');
       }
       const endedC = checkRoundEnd();
@@ -676,7 +751,17 @@ function dealDamage(defender, attacker, dmg, m) {
     }
   }
 
+  const guardianKey = defender.id + '_guardian_shell';
+  if (pveHasRelic('guardian_shell') && gameState.pve && defender.id === gameState.pve.playerId && !m.passiveUsed[guardianKey]) {
+    m.passiveUsed[guardianKey] = true;
+    const absorbed = Math.min(20, dmg);
+    dmg = Math.max(0, dmg - absorbed);
+    addLog(`◇ Guardian Shell absorbs ${absorbed} damage → ${dmg} net damage.`, 'passive');
+    if (dmg <= 0) { const r = checkRoundEnd(); if (!r) passTurn(); return; }
+  }
+
   defender.lp = Math.max(0, defender.lp - dmg);
+  recordDamageStat(attacker, defender, dmg, 'Hit');
   addLog(`${defender.name} takes ${dmg} damage! LP: ${defender.lp}`, 'damage');
 
   // Skill: Mystic Heal
@@ -767,6 +852,9 @@ function checkRoundEnd() {
   }
 
   m.roundResults.push(result);
+  const stats = ensureRoundStats(m);
+  stats.result = result;
+  stats.winnerId = result === 'f1' ? f1.id : result === 'f2' ? f2.id : null;
   const matchRes = getMatchResult();
   if (matchRes !== null) {
     m.phase = 'match_end';
@@ -829,6 +917,7 @@ function startNextRound() {
   m.attackValue = 0;
   m.attackRoll  = 0;
   m.stances     = {};
+  m.roundStats  = createRoundStats(f1.id, f2.id, m.round);
   m.ultFlags    = {};  // round/turn ult flags reset; ultReady/ultCharges persist
   m.attackIsDoubles = false;
   m.phase = 'declare_1';
@@ -883,6 +972,8 @@ function initPve(playerFighter) {
     credits: 0,
     playerId: playerFighter.id,
     purchases: [],       // permanent upgrade IDs bought
+    relics: [],
+    pendingRelicChoices: [],
     bonusMaxLp: 0,
     bonusDmg: 0,
     extraSkill: null,
@@ -898,6 +989,38 @@ function savePveProgress() {
 }
 
 function clearPveProgress() { localStorage.removeItem(PVE_SAVE_KEY); }
+
+function pveHasRelic(relicId) {
+  return !!(gameState.mode === 'pve' && gameState.pve && gameState.pve.relics && gameState.pve.relics.includes(relicId));
+}
+
+function ensurePveDefaults() {
+  if (!gameState.pve) return null;
+  gameState.pve.relics = gameState.pve.relics || [];
+  gameState.pve.pendingRelicChoices = gameState.pve.pendingRelicChoices || [];
+  return gameState.pve;
+}
+
+function pickPveRelicChoices(count = 3) {
+  const pve = ensurePveDefaults();
+  const owned = new Set((pve && pve.relics) || []);
+  const pool = PVE_RELICS.filter(r => !owned.has(r.id));
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count).map(r => r.id);
+}
+
+function pveChooseRelic(relicId) {
+  const pve = gameState.pve;
+  if (!pve || !pve.pendingRelicChoices || !pve.pendingRelicChoices.includes(relicId)) return false;
+  pve.relics = pve.relics || [];
+  if (!pve.relics.includes(relicId)) pve.relics.push(relicId);
+  pve.pendingRelicChoices = [];
+  savePveProgress();
+  return true;
+}
 
 function getPveStage() {
   return PVE_STAGES[gameState.pve.stageIdx];
