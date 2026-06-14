@@ -353,7 +353,7 @@ function doAttackCoin() {
     return { coin };
   }
 
-  if (attacker.skill === 'gamblers_edge' && !m.gamblerUsed[attacker.id]) {
+  if (fighterHasSkill(attacker, 'gamblers_edge') && !m.gamblerUsed[attacker.id]) {
     m.gamblerUsed[attacker.id] = true;
     const reroll = flipCoin();
     addLog(`${attacker.name} flips — TAILS! 🎲 Gambler's Edge — rerolling...`, 'skill');
@@ -413,10 +413,10 @@ function doAttackRoll() {
   let attackValue = roll;
 
   // Skill checks on base roll
-  if (attacker.skill === 'perfect_hit' && baseRoll === 3) {
+  if (fighterHasSkill(attacker, 'perfect_hit') && baseRoll === 3) {
     attackValue = PERFECT_HIT_VALUE;
     addLog(`${attacker.name} rolls 3 — 🎯 Perfect Hit! Attack value: ${PERFECT_HIT_VALUE}.`, 'skill');
-  } else if (attacker.skill === 'double_strike' && baseRoll === 6) {
+  } else if (fighterHasSkill(attacker, 'double_strike') && baseRoll === 6) {
     if (diceCount === 1 && !explosionBonus) addLog(`${attacker.name} rolls ${baseRoll} — ⚡ Double Strike primed!`, 'skill');
     else addLog(`⚡ Double Strike primed!`, 'skill');
   } else if (diceCount === 1 && !explosionBonus) {
@@ -515,7 +515,7 @@ function doDefendRoll() {
   const roll = rollDice();
 
   // Iron Guard
-  if (defender.skill === 'iron_guard' && roll === 6) {
+  if (fighterHasSkill(defender, 'iron_guard') && roll === 6) {
     addLog(`${defender.name} rolls 6 — 🛡️ Iron Guard! Attack negated!`, 'skill');
     let reflectDmg = IRON_GUARD_REFLECT;
     if (attacker.avatar === 'paladin') {
@@ -579,17 +579,17 @@ function applyDmgMods(dmg, attacker, defender, m) {
   if (dmg <= 0) return 0;
 
   // Skill: Double Strike
-  if (attacker.skill === 'double_strike' && m.attackRoll === 6) {
+  if (fighterHasSkill(attacker, 'double_strike') && m.attackRoll === 6) {
     dmg *= 2;
     addLog(`⚡ Double Strike! Damage ×2 → ${dmg}`, 'skill');
   }
   // Skill: Berserker (attacker)
-  if (attacker.skill === 'berserker' && attacker.lp < BERSERKER_THRESHOLD) {
+  if (fighterHasSkill(attacker, 'berserker') && attacker.lp < BERSERKER_THRESHOLD) {
     dmg *= 2;
     addLog(`🔥 Berserker Rage! Damage ×2 → ${dmg}`, 'skill');
   }
   // Skill: Berserker (defender vulnerability)
-  if (defender.skill === 'berserker' && defender.lp < BERSERKER_THRESHOLD) {
+  if (fighterHasSkill(defender, 'berserker') && defender.lp < BERSERKER_THRESHOLD) {
     dmg *= 2;
     addLog(`🔥 Berserker Vulnerability! Damage ×2 → ${dmg}`, 'skill');
   }
@@ -618,6 +618,12 @@ function applyDmgMods(dmg, attacker, defender, m) {
   if (m.ultFlags[rageKey]) {
     dmg += 80;
     addLog(`💢 Blood Rage! +80 damage → ${dmg}`, 'ultimate');
+  }
+
+  // PVE: Power Stone bonus damage (player only)
+  if (gameState.mode === 'pve' && gameState.pve && attacker.id === gameState.pve.playerId && gameState.pve.bonusDmg > 0) {
+    dmg += gameState.pve.bonusDmg;
+    addLog(`💪 Power Stone! +${gameState.pve.bonusDmg} → ${dmg}`, 'passive');
   }
 
   return dmg;
@@ -651,7 +657,7 @@ function dealDamage(defender, attacker, dmg, m) {
   addLog(`${defender.name} takes ${dmg} damage! LP: ${defender.lp}`, 'damage');
 
   // Skill: Mystic Heal
-  if (defender.skill === 'mystic_heal' && !m.mysticUsed[defender.id] && defender.lp > 0) {
+  if (fighterHasSkill(defender, 'mystic_heal') && !m.mysticUsed[defender.id] && defender.lp > 0) {
     m.mysticUsed[defender.id] = true;
     const healed = Math.min(MYSTIC_HEAL_AMOUNT, defender.maxLp - defender.lp);
     defender.lp = Math.min(defender.maxLp, defender.lp + MYSTIC_HEAL_AMOUNT);
@@ -695,6 +701,20 @@ function checkRoundEnd() {
   const f2 = getFighter(m.fighter2Id);
   if (f1.lp > 0 && f2.lp > 0) return null;
 
+  // PVE Phoenix Feather: revive player if they're about to lose a round
+  if (gameState.mode === 'pve' && gameState.pve && !gameState.pve.reviveUsed) {
+    const pve = gameState.pve;
+    const playerF = f1.id === pve.playerId ? f1 : f2;
+    const bossF   = f1.id === pve.playerId ? f2 : f1;
+    if (playerF.lp <= 0 && bossF.lp > 0 && pve.reviveActive) {
+      pve.reviveUsed = true;
+      playerF.lp = playerF.maxLp;
+      addLog(`🔥 Phoenix Feather! ${playerF.name} is revived to full LP!`, 'passive');
+      passTurn();
+      return null;
+    }
+  }
+
   let result;
   if (f1.lp <= 0 && f2.lp <= 0) {
     result = 'draw';
@@ -707,12 +727,19 @@ function checkRoundEnd() {
       m.warriorLpBonus[f2.id] = (m.warriorLpBonus[f2.id] || 0) + WARRIOR_LP_SCALE;
       addLog(`💪 Battle Hardened! ${f2.name} gains +${WARRIOR_LP_SCALE} max LP next round.`, 'passive');
     }
+    // PVE: credits for round win (boss wins = no credits; player wins a round = credits)
+    if (gameState.mode === 'pve' && gameState.pve && f2.id === gameState.pve.playerId) {
+      gameState.pve.credits += 25;
+    }
   } else {
     result = 'f1'; f1.roundWins++;
     addLog(`🏆 ${f1.name} wins Round ${m.round}!`, 'system');
     if (f1.avatar === 'warrior') {
       m.warriorLpBonus[f1.id] = (m.warriorLpBonus[f1.id] || 0) + WARRIOR_LP_SCALE;
       addLog(`💪 Battle Hardened! ${f1.name} gains +${WARRIOR_LP_SCALE} max LP next round.`, 'passive');
+    }
+    if (gameState.mode === 'pve' && gameState.pve && f1.id === gameState.pve.playerId) {
+      gameState.pve.credits += 25;
     }
   }
 
@@ -724,6 +751,15 @@ function checkRoundEnd() {
     if (matchRes === 'f1') addLog(`🥇 ${f1.name} wins the match!`, 'system');
     else if (matchRes === 'f2') addLog(`🥇 ${f2.name} wins the match!`, 'system');
     else addLog('🤝 Match ends in a DRAW!', 'system');
+    // PVE: bonus credits for winning the match
+    if (gameState.mode === 'pve' && gameState.pve) {
+      const pve = gameState.pve;
+      const stage = getPveStage();
+      if ((matchRes === 'f1' && f1.id === pve.playerId) || (matchRes === 'f2' && f2.id === pve.playerId)) {
+        pve.credits += stage.creditReward;
+        addLog(`💰 +${stage.creditReward} credits! Total: ${pve.credits}`, 'passive');
+      }
+    }
   } else {
     m.phase = 'round_end';
     if (result === 'f1') m.attackerId = m.fighter2Id;
@@ -780,4 +816,303 @@ function getMatchWinnerId() {
   if (m.matchWinner === 'f1') return m.fighter1Id;
   if (m.matchWinner === 'f2') return m.fighter2Id;
   return null;
+}
+
+// ─── Save / Load ──────────────────────────────────────────────────────────────
+
+function hasSave() { return !!localStorage.getItem(SAVE_KEY); }
+function clearSave() { localStorage.removeItem(SAVE_KEY); }
+
+function saveGame(screen) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ ...gameState, savedScreen: screen }));
+  } catch (e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    Object.assign(gameState, data);
+    return data.savedScreen;
+  } catch (e) { clearSave(); return null; }
+}
+
+// ─── Skill helper (supports PVE dual wield) ───────────────────────────────────
+
+function fighterHasSkill(fighter, skillId) {
+  if (fighter.skill === skillId) return true;
+  if (gameState.mode === 'pve' && gameState.pve && fighter.id === gameState.pve.playerId) {
+    return gameState.pve.extraSkill === skillId;
+  }
+  return false;
+}
+
+// ─── PVE ─────────────────────────────────────────────────────────────────────
+
+function initPve(playerFighter) {
+  gameState.mode = 'pve';
+  gameState.fighters = [playerFighter];
+  gameState.pve = {
+    stageIdx: 0,
+    credits: 0,
+    playerId: playerFighter.id,
+    purchases: [],       // permanent upgrade IDs bought
+    bonusMaxLp: 0,
+    bonusDmg: 0,
+    extraSkill: null,
+    intelActive: false,
+    reviveActive: false,
+    reviveUsed: false,   // used this match
+  };
+  savePveProgress();
+}
+
+function savePveProgress() {
+  try { localStorage.setItem(PVE_SAVE_KEY, JSON.stringify(gameState.pve)); } catch (e) {}
+}
+
+function clearPveProgress() { localStorage.removeItem(PVE_SAVE_KEY); }
+
+function getPveStage() {
+  return PVE_STAGES[gameState.pve.stageIdx];
+}
+
+function buildBossFighter(stage) {
+  return {
+    id: uid(), name: stage.name, avatar: stage.avatar, skill: stage.skill,
+    lp: MAX_LP, maxLp: MAX_LP, roundWins: 0, isBoss: true,
+  };
+}
+
+function startPveMatch() {
+  const pve = gameState.pve;
+  const player = gameState.fighters.find(f => f.id === pve.playerId);
+  const stage = getPveStage();
+  const boss = buildBossFighter(stage);
+
+  // Apply permanent upgrades to player
+  player.maxLp = (player.avatar === 'warrior' ? WARRIOR_MAX_LP : MAX_LP) + pve.bonusMaxLp;
+  player.lp = player.maxLp;
+  player.roundWins = 0;
+
+  boss.lp = boss.maxLp;
+  boss.roundWins = 0;
+
+  // Reset per-match revive flag
+  pve.reviveUsed = false;
+  pve.reviveActive = pve.purchases.includes('revive');
+
+  // Store boss in fighters temporarily
+  gameState.fighters = [player, boss];
+  startMatch(player.id, boss.id, 3);
+
+  // Boss stance is always balanced — store reference for auto-pick
+  gameState.currentMatch._pveBossId = boss.id;
+}
+
+function pveBuyItem(itemId) {
+  const pve = gameState.pve;
+  const item = PVE_SHOP_ITEMS.find(i => i.id === itemId);
+  if (!item || pve.credits < item.cost) return false;
+
+  // Can't buy permanent items twice (except revive/intel which are run items)
+  if (item.type === 'permanent' && pve.purchases.includes(itemId)) return false;
+
+  pve.credits -= item.cost;
+  pve.purchases.push(itemId);
+
+  switch (itemId) {
+    case 'hp_boost':    pve.bonusMaxLp += 100; break;
+    case 'dmg_boost':   pve.bonusDmg   += 20;  break;
+    case 'monster_intel': pve.intelActive = true; break;
+    case 'revive':        pve.reviveActive = true; break;
+    // dual_wield handled via renderPveShop skill picker
+  }
+
+  savePveProgress();
+  return true;
+}
+
+function pveBuyDualWield(skillId) {
+  const pve = gameState.pve;
+  const item = PVE_SHOP_ITEMS.find(i => i.id === 'dual_wield');
+  if (!item || pve.credits < item.cost) return false;
+  if (pve.purchases.includes('dual_wield')) return false;
+
+  pve.credits -= item.cost;
+  pve.purchases.push('dual_wield');
+  pve.extraSkill = skillId;
+  savePveProgress();
+  return true;
+}
+
+// ─── Double Elimination ───────────────────────────────────────────────────────
+
+function generateDoubleElimBracket() {
+  const shuffled = [...gameState.fighters].sort(() => Math.random() - 0.5);
+  const n = shuffled.length;
+
+  let stages;
+  if (n === 4) {
+    const [a, b, c, d] = shuffled.map(f => f.id);
+    stages = [
+      { name: 'Upper — Round 1',  type: 'ub', matches: [
+        { fighter1Id: a, fighter2Id: b, winnerId: null, loserId: null },
+        { fighter1Id: c, fighter2Id: d, winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Round 1',  type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Upper — Final',    type: 'ub', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Final',    type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Grand Final',      type: 'gf', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+    ];
+  } else {
+    const ids = shuffled.map(f => f.id);
+    stages = [
+      { name: 'Upper — Round 1',    type: 'ub', matches: [
+        { fighter1Id: ids[0], fighter2Id: ids[1], winnerId: null, loserId: null },
+        { fighter1Id: ids[2], fighter2Id: ids[3], winnerId: null, loserId: null },
+        { fighter1Id: ids[4], fighter2Id: ids[5], winnerId: null, loserId: null },
+        { fighter1Id: ids[6], fighter2Id: ids[7], winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Round 1',    type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Upper — Semi-Finals',type: 'ub', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Round 2',    type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Upper — Final',      type: 'ub', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Semi-Final', type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Lower — Final',      type: 'lb', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+      { name: 'Grand Final',        type: 'gf', matches: [
+        { fighter1Id: null, fighter2Id: null, winnerId: null, loserId: null },
+      ]},
+    ];
+  }
+
+  return {
+    type: 'double_elim', stages,
+    currentStageIdx: 0, currentMatchIdx: 0,
+    ubChampion: null, lbChampion: null,
+    playerCount: n,
+  };
+}
+
+function fillDoubleElimNextStages(b, si) {
+  const s = b.stages;
+  const w = (stageIdx, mi) => s[stageIdx].matches[mi].winnerId;
+  const l = (stageIdx, mi) => s[stageIdx].matches[mi].loserId;
+
+  if (b.playerCount === 4) {
+    if (si === 0) {
+      s[1].matches[0].fighter1Id = l(0, 0); s[1].matches[0].fighter2Id = l(0, 1);
+      s[2].matches[0].fighter1Id = w(0, 0); s[2].matches[0].fighter2Id = w(0, 1);
+    }
+    if (si === 1) { s[3].matches[0].fighter1Id = w(1, 0); }
+    if (si === 2) {
+      b.ubChampion = w(2, 0);
+      s[4].matches[0].fighter1Id = w(2, 0);
+      s[3].matches[0].fighter2Id = l(2, 0);
+    }
+    if (si === 3) {
+      b.lbChampion = w(3, 0);
+      s[4].matches[0].fighter2Id = w(3, 0);
+    }
+    if (si === 4 && w(4, 0) === b.lbChampion) {
+      s.push({ name: 'Grand Final — Reset', type: 'gf_reset', matches: [
+        { fighter1Id: b.ubChampion, fighter2Id: b.lbChampion, winnerId: null, loserId: null },
+      ]});
+    }
+  } else {
+    if (si === 0) {
+      s[1].matches[0].fighter1Id = l(0, 0); s[1].matches[0].fighter2Id = l(0, 1);
+      s[1].matches[1].fighter1Id = l(0, 2); s[1].matches[1].fighter2Id = l(0, 3);
+      s[2].matches[0].fighter1Id = w(0, 0); s[2].matches[0].fighter2Id = w(0, 1);
+      s[2].matches[1].fighter1Id = w(0, 2); s[2].matches[1].fighter2Id = w(0, 3);
+    }
+    if (si === 1) {
+      s[3].matches[0].fighter1Id = w(1, 0);
+      s[3].matches[1].fighter1Id = w(1, 1);
+    }
+    if (si === 2) {
+      s[4].matches[0].fighter1Id = w(2, 0); s[4].matches[0].fighter2Id = w(2, 1);
+      s[3].matches[0].fighter2Id = l(2, 0);
+      s[3].matches[1].fighter2Id = l(2, 1);
+    }
+    if (si === 3) {
+      s[5].matches[0].fighter1Id = w(3, 0); s[5].matches[0].fighter2Id = w(3, 1);
+    }
+    if (si === 4) {
+      b.ubChampion = w(4, 0);
+      s[7].matches[0].fighter1Id = w(4, 0);
+      s[6].matches[0].fighter2Id = l(4, 0);
+    }
+    if (si === 5) { s[6].matches[0].fighter1Id = w(5, 0); }
+    if (si === 6) {
+      b.lbChampion = w(6, 0);
+      s[7].matches[0].fighter2Id = w(6, 0);
+    }
+    if (si === 7 && w(7, 0) === b.lbChampion) {
+      s.push({ name: 'Grand Final — Reset', type: 'gf_reset', matches: [
+        { fighter1Id: b.ubChampion, fighter2Id: b.lbChampion, winnerId: null, loserId: null },
+      ]});
+    }
+  }
+}
+
+function advanceDoubleElimBracket(winnerId) {
+  const b = gameState.cupBracket;
+  const si = b.currentStageIdx;
+  const mi = b.currentMatchIdx;
+  const match = b.stages[si].matches[mi];
+
+  match.winnerId = winnerId;
+  match.loserId  = match.fighter1Id === winnerId ? match.fighter2Id : match.fighter1Id;
+
+  if (mi + 1 < b.stages[si].matches.length) {
+    b.currentMatchIdx = mi + 1;
+    return 'next_match';
+  }
+
+  fillDoubleElimNextStages(b, si);
+
+  if (b.stages[si].type === 'gf' || b.stages[si].type === 'gf_reset') {
+    const nextSi = si + 1;
+    if (nextSi < b.stages.length && b.stages[nextSi].type === 'gf_reset') {
+      b.currentStageIdx = nextSi;
+      b.currentMatchIdx = 0;
+      return 'next_match';
+    }
+    return 'tournament_over';
+  }
+
+  b.currentStageIdx = si + 1;
+  b.currentMatchIdx = 0;
+  return 'next_stage';
+}
+
+function getDoubleElimWinner() {
+  const b = gameState.cupBracket;
+  return b.stages[b.currentStageIdx].matches[0].winnerId;
 }

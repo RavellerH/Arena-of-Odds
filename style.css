@@ -491,6 +491,60 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
 .declare-rev-stance { font-size: 1rem; font-weight: 700; }
 .declare-rev-desc   { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
 
+/* ── Double Elimination Bracket ──────────────────────────────── */
+.de-section { margin-bottom: 16px; }
+.de-section-title {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--muted); margin-bottom: 8px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.de-note {
+  font-size: 0.8rem; color: var(--muted); text-align: center;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2);
+  max-width: 500px; margin: 0 auto;
+}
+
+/* ── PVE Campaign ─────────────────────────────────────────────── */
+.pve-camp-wrap {
+  width: 100%; max-width: 480px;
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
+.pve-progress { text-align: center; }
+.pve-boss-icon { font-size: 4rem; margin-bottom: 4px; animation: winBounce 1.4s ease infinite alternate; }
+.pve-lore { font-size: 0.82rem; color: var(--muted); font-style: italic; margin-top: 6px; }
+.pve-credits { font-size: 0.88rem; font-weight: 700; color: var(--gold); }
+.pve-intel {
+  margin-top: 10px; padding: 10px; border-radius: var(--radius);
+  background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.2);
+}
+.pve-upgrades { display: flex; flex-wrap: wrap; gap: 4px; }
+.pve-upgrade-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 20px;
+  font-size: 0.7rem; font-weight: 700; background: var(--bg3);
+  border: 1px solid var(--border); color: var(--muted);
+}
+
+/* PVE Shop */
+.pve-shop-list { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 480px; }
+.pve-shop-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px; border-radius: var(--radius);
+  background: var(--bg2); border: 1px solid var(--border);
+}
+.pve-shop-item-icon { font-size: 1.5rem; flex-shrink: 0; width: 32px; text-align: center; }
+.pve-shop-item-info { flex: 1; min-width: 0; }
+.pve-shop-item-name { font-size: 0.88rem; font-weight: 700; margin-bottom: 2px; }
+.pve-shop-item-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.4; }
+.pve-shop-item-action { flex-shrink: 0; }
+.pve-shop-owned { font-size: 0.72rem; color: var(--green); font-weight: 700; }
+.pve-type-tag {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); background: var(--bg3); padding: 1px 5px;
+  border-radius: 10px; margin-left: 4px;
+}
+
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 520px) {
   .fighters-row { grid-template-columns: 1fr; }

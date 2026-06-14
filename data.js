@@ -160,6 +160,28 @@ const STANCES = {
 
 const STANCE_IDS = Object.keys(STANCES);
 
+// Save / PVE storage keys
+const SAVE_KEY     = 'aoo_save';
+const PVE_SAVE_KEY = 'aoo_pve';
+
+// PVE Campaign stages
+const PVE_STAGES = [
+  { id: 'goblin',   name: 'Goblin Scout',  avatar: 'rogue',       skill: 'gamblers_edge', icon: '👺', lore: 'Slippery and unpredictable.',   creditReward: 100 },
+  { id: 'troll',    name: 'Cave Troll',    avatar: 'warrior',     skill: 'iron_guard',    icon: '🧌', lore: 'Tough hide, slow mind.',        creditReward: 125 },
+  { id: 'witch',    name: 'Swamp Witch',   avatar: 'mage',        skill: 'mystic_heal',   icon: '🧙', lore: 'Magic flows through her veins.', creditReward: 150 },
+  { id: 'warlord',  name: 'Orc Warlord',   avatar: 'berserker',   skill: 'double_strike', icon: '🗡️', lore: 'Fury incarnate.',               creditReward: 175 },
+  { id: 'lichking', name: 'The Lich King', avatar: 'necromancer', skill: 'perfect_hit',   icon: '💀', lore: 'Death itself walks the arena.',  creditReward: 200 },
+];
+
+// PVE Shop items
+const PVE_SHOP_ITEMS = [
+  { id: 'hp_boost',     name: '+100 Max LP',    icon: '❤️',  cost: 150, type: 'permanent', desc: 'Increase max LP by 100 for this run.' },
+  { id: 'dmg_boost',    name: 'Power Stone',    icon: '💪',  cost: 175, type: 'permanent', desc: 'Deal +20 flat bonus damage on every hit.' },
+  { id: 'dual_wield',   name: 'Dual Wield',     icon: '⚡',  cost: 250, type: 'permanent', desc: 'Gain a second skill that activates alongside your first.' },
+  { id: 'monster_intel',name: 'Monster Intel',  icon: '🔍',  cost: 75,  type: 'run',       desc: "Reveal next boss's passive and skill before the fight." },
+  { id: 'revive',       name: 'Phoenix Feather',icon: '🔥',  cost: 200, type: 'run',       desc: 'If you lose a round this match, restore to full LP once.' },
+];
+
 const ULTIMATES = {
   warrior: {
     name: 'Last Stand',

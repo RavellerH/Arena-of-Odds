@@ -101,18 +101,36 @@ function clearFightDisplay() {
 // ── MENU ──────────────────────────────────────────────────────────────────────
 
 function renderMenu() {
+  const continueBtn = hasSave()
+    ? `<button class="btn btn-gold" onclick="continueGame()">Continue →</button>` : '';
   setHTML('screen-menu', `
     <div class="menu-title">
       <span class="line1">Arena of</span>
       <h1>ODDS</h1>
     </div>
     <div class="menu-buttons">
+      ${continueBtn}
       <button class="btn btn-primary btn-large" onclick="goNewGame()">New Game</button>
+      <button class="btn btn-secondary"         onclick="startPveSetup()">⚔️ PVE Campaign</button>
       <button class="btn btn-secondary"         onclick="goHowToPlay()">How to Play</button>
     </div>
     <p class="subtitle">Coin · Dice · Duel &nbsp;·&nbsp; 4–8 Players</p>
   `);
   showScreen('screen-menu');
+}
+
+function continueGame() {
+  const screen = loadGame();
+  if (!screen) { renderMenu(); return; }
+  if (screen === 'result')    { renderMatchResult(); return; }
+  if (screen === 'standings') { renderStandings(gameState.scheduleIndex >= gameState.schedule.length); return; }
+  if (screen === 'bracket') {
+    if (gameState.cupBracket && gameState.cupBracket.type === 'double_elim') renderDoubleElimBracket();
+    else renderBracket();
+    return;
+  }
+  if (screen === 'pve_camp')  { renderPveCamp(); return; }
+  renderMenu();
 }
 
 function goNewGame() {
@@ -220,7 +238,9 @@ function renderFighterSetup() {
       <div class="btn-row">
         ${idx > 0
           ? `<button class="btn btn-secondary" onclick="goBackSetup()">← Back</button>`
-          : `<button class="btn btn-secondary" onclick="renderPlayerCount()">← Back</button>`}
+          : uiState._pveSetup
+            ? `<button class="btn btn-secondary" onclick="uiState._pveSetup=false;renderMenu()">← Back</button>`
+            : `<button class="btn btn-secondary" onclick="renderPlayerCount()">← Back</button>`}
         <button class="btn btn-primary" onclick="confirmFighter()">
           ${idx + 1 < total ? 'Next →' : 'Done →'}
         </button>
@@ -247,6 +267,7 @@ function goBackSetup() {
 }
 
 function confirmFighter() {
+  if (uiState._pveSetup) { confirmFighterPve(); return; }
   const name = (uiState.pendingName || '').trim() || `Fighter ${uiState.currentSetupIdx + 1}`;
   uiState.setupFighters.push(createFighter(name, uiState.pendingAvatar, uiState.pendingSkill));
   uiState.currentSetupIdx++;
@@ -283,7 +304,12 @@ function renderModeSelect() {
       <div class="mode-card" onclick="startCup()">
         <div class="mode-icon">🥊</div>
         <h3>Cup Mode</h3>
-        <p>Single-elimination knockout. ${n === 4 ? 'SF + Final.' : 'QF + SF + Final.'} Losers go home.</p>
+        <p>Single-elimination. ${n === 4 ? 'SF + Final.' : 'QF + SF + Final.'} Losers go home.</p>
+      </div>
+      <div class="mode-card" onclick="startDoubleElim()">
+        <div class="mode-icon">⚖️</div>
+        <h3>Double Elimination</h3>
+        <p>Upper & Lower brackets. One loss doesn't end your run. Grand Final reset possible.</p>
       </div>
     </div>
     <button class="btn btn-secondary" style="margin-top:12px" onclick="goBackFromMode()">← Back</button>
@@ -319,6 +345,12 @@ function startCup() {
   launchCurrentCupMatch();
 }
 
+function startDoubleElim() {
+  gameState.mode = 'cup';
+  gameState.cupBracket = generateDoubleElimBracket();
+  launchCurrentDoubleElimMatch();
+}
+
 // ── TOURNAMENT FLOW ───────────────────────────────────────────────────────────
 
 function launchNextLeagueMatch() {
@@ -352,22 +384,47 @@ function launchCurrentCupMatch() {
   renderFight(`${round.name}`, 'cup');
 }
 
+function launchCurrentDoubleElimMatch() {
+  const b = gameState.cupBracket;
+  const stage = b.stages[b.currentStageIdx];
+  const match = stage.matches[b.currentMatchIdx];
+  const isGF = stage.type === 'gf' || stage.type === 'gf_reset';
+  uiState.cupIsFinal = isGF;
+  uiState.isLeagueFinal = false;
+  clearFightDisplay();
+  startMatch(match.fighter1Id, match.fighter2Id, isGF ? 5 : 3);
+  renderFight(stage.name, 'cup');
+}
+
 function continueAfterMatch() {
+  if (gameState.mode === 'pve') {
+    continuePveAfterMatch();
+    return;
+  }
   if (gameState.mode === 'league') {
     if (uiState.isLeagueFinal) {
       const winnerId = cupTiebreak();
       gameState.leagueFinalDone = true;
+      clearSave();
       renderWinner(winnerId);
     } else {
       recordLeagueResult();
       gameState.scheduleIndex++;
+      saveGame('standings');
       renderStandings(gameState.scheduleIndex >= gameState.schedule.length);
     }
   } else {
     const winnerId = cupTiebreak();
-    const status = advanceCupBracket(winnerId);
-    if (status === 'tournament_over') renderWinner(winnerId);
-    else renderBracket();
+    const isDE = gameState.cupBracket && gameState.cupBracket.type === 'double_elim';
+    if (isDE) {
+      const status = advanceDoubleElimBracket(winnerId);
+      if (status === 'tournament_over') { clearSave(); renderWinner(getDoubleElimWinner()); }
+      else { saveGame('bracket'); renderDoubleElimBracket(); }
+    } else {
+      const status = advanceCupBracket(winnerId);
+      if (status === 'tournament_over') { clearSave(); renderWinner(winnerId); }
+      else { saveGame('bracket'); renderBracket(); }
+    }
   }
 }
 
@@ -453,6 +510,10 @@ function renderDeclarePhase(matchTitle) {
 
 function selectStance(stanceId) {
   doStanceDeclare(stanceId);
+  // In PVE, auto-pick balanced for the boss
+  if (gameState.mode === 'pve' && gameState.currentMatch && gameState.currentMatch.phase === 'declare_2') {
+    doStanceDeclare('balanced');
+  }
   rerenderFight();
 }
 
@@ -553,9 +614,10 @@ function renderFight(matchTitle, context) {
     actionBtn   = `<button class="btn btn-gold btn-large" onclick="handleFightAction()">View Results →</button>`;
   }
 
-  // ── Ultimate button (attack turn only, if not yet used) ──
+  // ── Ultimate button (attack turn only, if not yet used; hidden for PVE boss) ──
   let ultBtn = '';
-  if (phase === 'attack_coin' && !m.ultUsed[actor.id]) {
+  const isPlayerActing = gameState.mode !== 'pve' || !gameState.pve || actor.id === gameState.pve.playerId;
+  if (phase === 'attack_coin' && !m.ultUsed[actor.id] && isPlayerActing) {
     const ult = ULTIMATES[actor.avatar];
     if (ult) {
       ultBtn = `
@@ -619,7 +681,7 @@ function renderFight(matchTitle, context) {
       <div class="turn-header">
         <div class="turn-role">${roleLabel}</div>
         ${!isEndPhase ? `<div class="turn-name">${escapeHtml(actor.name)}</div>` : ''}
-        <div class="turn-action">${actionLabel}</div>
+        <div class="turn-action">${isBossActingInPve() ? '⏳ Boss is acting…' : actionLabel}</div>
       </div>
 
       <div class="ctx-chips">${chips}</div>
@@ -687,6 +749,7 @@ function useUltimate() {
 
 function rerenderFight() {
   renderFight(gameState.currentMatch._title, gameState.currentMatch._context);
+  autoPlayBossIfNeeded();
 }
 
 function animateEl(id, cls) {
@@ -720,6 +783,7 @@ function renderMatchResult() {
     roundRows += `<div class="log-line system">Round ${i + 1}: ${r === 'draw' ? '🤝' : '🏆'} ${escapeHtml(w)}</div>`;
   });
 
+  if (gameState.mode !== 'pve') saveGame('result');
   setHTML('screen-result', `
     <div style="width:100%;max-width:440px;display:flex;flex-direction:column;gap:20px;text-align:center">
       <h2>Match Result</h2>
@@ -790,6 +854,7 @@ function renderStandings(showFinal) {
       </div>`;
   }
 
+  if (gameState.mode === 'league') saveGame('standings');
   setHTML('screen-standings', `
     <div style="width:100%;max-width:680px;display:flex;flex-direction:column;gap:16px">
       <h2 class="section-title">League Standings</h2>
@@ -871,11 +936,88 @@ function renderBracket() {
   showScreen('screen-bracket');
 }
 
+// ── DOUBLE ELIM BRACKET ───────────────────────────────────────────────────────
+
+function renderDoubleElimBracket() {
+  const b = gameState.cupBracket;
+  const cr = b.currentStageIdx;
+  const cm = b.currentMatchIdx;
+
+  const ubStages = b.stages.filter(s => s.type === 'ub');
+  const lbStages = b.stages.filter(s => s.type === 'lb');
+  const gfStages = b.stages.filter(s => s.type === 'gf' || s.type === 'gf_reset');
+
+  function renderStageGroup(stages, title) {
+    let html = `<div class="de-section"><div class="de-section-title">${title}</div><div class="bracket-wrap">`;
+    stages.forEach(stage => {
+      const stageIdx = b.stages.indexOf(stage);
+      let matchHtml = '';
+      stage.matches.forEach((match, mi) => {
+        const isActive = stageIdx === cr && mi === cm && !match.winnerId;
+        const f1 = match.fighter1Id ? getFighter(match.fighter1Id) : null;
+        const f2 = match.fighter2Id ? getFighter(match.fighter2Id) : null;
+        const w  = match.winnerId;
+        matchHtml += `
+          <div class="bracket-match ${isActive ? 'active' : ''}">
+            <div class="bracket-fighter ${!f1 ? 'tbd' : w === match.fighter1Id ? 'winner' : ''}">
+              ${f1 ? `${avatarIcon(f1.avatar)} ${escapeHtml(f1.name)}` : '<em>TBD</em>'}
+              ${w === match.fighter1Id ? ' 🏆' : ''}
+            </div>
+            <div class="bracket-fighter ${!f2 ? 'tbd' : w === match.fighter2Id ? 'winner' : ''}">
+              ${f2 ? `${avatarIcon(f2.avatar)} ${escapeHtml(f2.name)}` : '<em>TBD</em>'}
+              ${w === match.fighter2Id ? ' 🏆' : ''}
+            </div>
+          </div>`;
+      });
+      html += `<div class="bracket-round"><div class="bracket-round-title">${stage.name}</div>${matchHtml}</div>`;
+    });
+    html += `</div></div>`;
+    return html;
+  }
+
+  const nextStage = b.stages[cr];
+  const nextMatch = nextStage && nextStage.matches[cm];
+  const nf1 = nextMatch && nextMatch.fighter1Id ? getFighter(nextMatch.fighter1Id) : null;
+  const nf2 = nextMatch && nextMatch.fighter2Id ? getFighter(nextMatch.fighter2Id) : null;
+  const isGF  = nextStage && (nextStage.type === 'gf' || nextStage.type === 'gf_reset');
+
+  const lbNote = b.lbChampion && !isGF ? `<div class="de-note">⚠️ UB champion needs 1 win to claim the title. LB champion must win twice (to force a reset).</div>` : '';
+
+  setHTML('screen-bracket', `
+    <div style="width:100%;max-width:900px;display:flex;flex-direction:column;gap:16px">
+      <h2 class="section-title">Double Elimination Bracket</h2>
+      <div class="card" style="padding:16px">
+        ${renderStageGroup(ubStages, '🔺 Upper Bracket')}
+        ${renderStageGroup(lbStages, '🔻 Lower Bracket')}
+        ${gfStages.length ? renderStageGroup(gfStages, '🏆 Grand Final') : ''}
+      </div>
+      ${lbNote}
+      ${nf1 && nf2 ? `
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">
+            ${nextStage.name} — ${isGF ? 'Best of 5' : 'Best of 3'}
+            ${isGF && nextStage.type === 'gf_reset' ? ' (RESET)' : ''}
+          </div>
+          <div style="font-size:1rem;font-weight:700;margin-bottom:14px">
+            ${avatarIcon(nf1.avatar)} ${escapeHtml(nf1.name)}
+            <span style="color:var(--muted)"> vs </span>
+            ${avatarIcon(nf2.avatar)} ${escapeHtml(nf2.name)}
+          </div>
+          <button class="btn ${isGF ? 'btn-gold' : 'btn-primary'} btn-large" onclick="launchCurrentDoubleElimMatch()">
+            ${isGF ? '⚜️ Start Grand Final' : 'Start Match →'}
+          </button>
+        </div>` : ''}
+    </div>
+  `);
+  showScreen('screen-bracket');
+}
+
 // ── WINNER ────────────────────────────────────────────────────────────────────
 
 function renderWinner(fighterId) {
   const f = getFighter(fighterId);
-  const title = gameState.mode === 'league' ? 'League Champion' : 'Cup Champion';
+  const title = gameState.mode === 'league' ? 'League Champion' : gameState.mode === 'pve' ? 'Campaign Champion' : 'Cup Champion';
+  clearSave();
   setHTML('screen-winner', `
     <div style="display:flex;flex-direction:column;align-items:center;gap:18px;padding:20px;text-align:center">
       <div class="winner-avatar">${avatarIcon(f.avatar)}</div>
@@ -893,6 +1035,272 @@ function renderWinner(fighterId) {
     </div>
   `);
   showScreen('screen-winner');
+}
+
+// ── PVE CAMPAIGN ─────────────────────────────────────────────────────────────
+
+let pveAutoPlayTimer = null;
+
+function startPveSetup() {
+  uiState.setupFighters = [];
+  uiState.currentSetupIdx = 0;
+  uiState.playerCount = 1;
+  uiState.pendingName = '';
+  uiState.pendingAvatar = AVATARS[0].id;
+  uiState.pendingSkill = SKILL_IDS[0];
+  uiState._pveSetup = true;
+  renderFighterSetup();
+}
+
+function confirmFighterPve() {
+  const name = (uiState.pendingName || '').trim() || 'Hero';
+  const fighter = createFighter(name, uiState.pendingAvatar, uiState.pendingSkill);
+  initPve(fighter);
+  uiState._pveSetup = false;
+  renderPveCamp();
+}
+
+function renderPveCamp() {
+  const pve = gameState.pve;
+  const player = gameState.fighters.find(f => f.id === pve.playerId);
+  const stageIdx = pve.stageIdx;
+  const stage = PVE_STAGES[stageIdx];
+  const done = stageIdx >= PVE_STAGES.length;
+
+  if (done) { clearPveProgress(); clearSave(); renderWinner(pve.playerId); return; }
+
+  // Stage progress bar
+  const progressDots = PVE_STAGES.map((s, i) => {
+    const cls = i < stageIdx ? 'done' : i === stageIdx ? 'current' : '';
+    return `<div class="setup-dot ${cls}" title="${s.name}"></div>`;
+  }).join('');
+
+  // Intel reveal
+  const intelHtml = pve.intelActive
+    ? `<div class="pve-intel">
+        <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:4px">🔍 Monster Intel</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          ${renderSkillBadge(stage.skill)}
+          ${renderPassiveBadge(stage.avatar)}
+        </div>
+       </div>`
+    : '';
+
+  // Upgrades on player
+  const extraSkillHtml = pve.extraSkill ? renderSkillBadge(pve.extraSkill) : '';
+  const upgradeList = pve.purchases.filter(id => !['monster_intel','revive'].includes(id)).map(id => {
+    const item = PVE_SHOP_ITEMS.find(i => i.id === id);
+    return item ? `<span class="pve-upgrade-tag">${item.icon} ${item.name}</span>` : '';
+  }).join('');
+
+  saveGame('pve_camp');
+
+  setHTML('screen-pve-camp', `
+    <div class="pve-camp-wrap">
+      <div class="pve-progress">
+        <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px">Stage ${stageIdx + 1} of ${PVE_STAGES.length}</div>
+        <div class="setup-progress" style="max-width:300px">${progressDots}</div>
+      </div>
+
+      <div class="card" style="text-align:center;padding:20px;max-width:440px;width:100%">
+        <div class="pve-boss-icon">${stage.icon}</div>
+        <h2 style="margin:8px 0 4px">${stage.name}</h2>
+        <div class="pve-lore">${stage.lore}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center;margin-top:10px">
+          ${renderSkillBadge(stage.skill)}
+          ${renderPassiveBadge(stage.avatar)}
+        </div>
+        ${intelHtml}
+      </div>
+
+      <div class="card" style="max-width:440px;width:100%;padding:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>${avatarIcon(player.avatar)} <strong>${escapeHtml(player.name)}</strong></div>
+          <div class="pve-credits">💰 ${pve.credits} cr</div>
+        </div>
+        ${renderSkillBadge(player.skill)}${extraSkillHtml ? ' ' + extraSkillHtml : ''}
+        ${upgradeList ? `<div class="pve-upgrades" style="margin-top:8px">${upgradeList}</div>` : ''}
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="renderPveShop()">🛒 Shop</button>
+        <button class="btn btn-gold btn-large" onclick="launchPveMatch()">⚔️ Fight ${stage.name}!</button>
+      </div>
+      <button class="btn btn-secondary" style="margin-top:4px" onclick="renderMenu()">← Main Menu</button>
+    </div>
+  `);
+  showScreen('screen-pve-camp');
+}
+
+function renderPveShop() {
+  const pve = gameState.pve;
+  const player = gameState.fighters.find(f => f.id === pve.playerId);
+  const dualWieldBought = pve.purchases.includes('dual_wield');
+
+  let itemsHtml = PVE_SHOP_ITEMS.map(item => {
+    const owned = item.type === 'permanent' && pve.purchases.includes(item.id);
+    const canAfford = pve.credits >= item.cost;
+    const isActive = item.id === 'revive' && pve.purchases.includes('revive');
+
+    let btn;
+    if (owned || isActive) {
+      btn = `<span class="pve-shop-owned">✓ Owned</span>`;
+    } else if (!canAfford) {
+      btn = `<button class="btn btn-secondary" disabled>${item.cost} cr</button>`;
+    } else if (item.id === 'dual_wield') {
+      btn = `<button class="btn btn-primary" onclick="renderPveDualWieldPicker()">Buy — ${item.cost} cr</button>`;
+    } else {
+      btn = `<button class="btn btn-primary" onclick="handlePveBuy('${item.id}')">Buy — ${item.cost} cr</button>`;
+    }
+
+    return `<div class="pve-shop-item">
+      <div class="pve-shop-item-icon">${item.icon}</div>
+      <div class="pve-shop-item-info">
+        <div class="pve-shop-item-name">${item.name} <span class="pve-type-tag">${item.type}</span></div>
+        <div class="pve-shop-item-desc">${item.desc}</div>
+      </div>
+      <div class="pve-shop-item-action">${btn}</div>
+    </div>`;
+  }).join('');
+
+  setHTML('screen-pve-camp', `
+    <div class="pve-camp-wrap">
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;max-width:480px">
+        <h2>Shop</h2>
+        <div class="pve-credits">💰 ${pve.credits} cr</div>
+      </div>
+      <div class="pve-shop-list">${itemsHtml}</div>
+      <button class="btn btn-primary btn-large" onclick="renderPveCamp()">← Back to Camp</button>
+    </div>
+  `);
+  showScreen('screen-pve-camp');
+}
+
+function renderPveDualWieldPicker() {
+  const pve = gameState.pve;
+  const player = gameState.fighters.find(f => f.id === pve.playerId);
+  const availableSkills = SKILL_IDS.filter(id => id !== player.skill);
+
+  const skillHtml = availableSkills.map(sid => {
+    const s = SKILLS[sid];
+    return `<div class="skill-option" onclick="handlePveDualWield('${sid}')">
+      <span class="skill-icon" style="color:${s.color}">${s.icon}</span>
+      <div>
+        <div class="skill-name" style="color:${s.color}">${s.name}</div>
+        <div class="skill-desc">${s.description}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  setHTML('screen-pve-camp', `
+    <div class="pve-camp-wrap">
+      <h2>Choose Your Second Skill</h2>
+      <p class="subtitle">Costs 250 cr. Both skills will be active.</p>
+      <div class="skill-grid" style="max-width:480px;width:100%">${skillHtml}</div>
+      <button class="btn btn-secondary" onclick="renderPveShop()">← Cancel</button>
+    </div>
+  `);
+  showScreen('screen-pve-camp');
+}
+
+function handlePveBuy(itemId) {
+  if (pveBuyItem(itemId)) renderPveShop();
+}
+
+function handlePveDualWield(skillId) {
+  if (pveBuyDualWield(skillId)) renderPveShop();
+}
+
+function launchPveMatch() {
+  startPveMatch();
+  clearFightDisplay();
+  const stage = getPveStage();
+  renderFight(`Stage ${gameState.pve.stageIdx + 1}: ${stage.name}`, 'pve');
+}
+
+function continuePveAfterMatch() {
+  const pve = gameState.pve;
+  const winnerId = cupTiebreak(); // reuse tiebreak logic
+  const playerWon = winnerId === pve.playerId;
+
+  savePveProgress();
+
+  if (playerWon) {
+    pve.stageIdx++;
+    pve.intelActive = false;
+    pve.purchases = pve.purchases.filter(id => id !== 'monster_intel' && id !== 'revive');
+    savePveProgress();
+  }
+  renderPveMatchResult(playerWon);
+}
+
+function renderPveMatchResult(playerWon) {
+  const pve = gameState.pve;
+  const player = gameState.fighters.find(f => f.id === pve.playerId);
+  const m = gameState.currentMatch;
+  const boss = getFighter(m.fighter1Id === pve.playerId ? m.fighter2Id : m.fighter1Id);
+  const f1rw = m.roundResults.filter(r => r === 'f1').length;
+  const f2rw = m.roundResults.filter(r => r === 'f2').length;
+  const playerRw = m.fighter1Id === pve.playerId ? f1rw : f2rw;
+  const bossRw = m.fighter1Id === pve.playerId ? f2rw : f1rw;
+  const stage = PVE_STAGES[playerWon ? pve.stageIdx - 1 : pve.stageIdx];
+
+  setHTML('screen-result', `
+    <div style="width:100%;max-width:440px;display:flex;flex-direction:column;gap:20px;text-align:center">
+      <h2>${playerWon ? '🏆 Victory!' : '💀 Defeated'}</h2>
+      <div class="match-result-banner" style="${playerWon ? '' : 'border-color:rgba(248,113,113,0.3);background:rgba(248,113,113,0.08);color:var(--red)'}">
+        ${playerWon ? `You defeated ${boss.name}!` : `${boss.name} defeated you.`}
+      </div>
+      <div style="display:flex;justify-content:center;gap:40px">
+        <div>
+          <div style="font-size:1.8rem;font-weight:800">${playerRw}</div>
+          <div style="font-size:0.75rem;color:var(--muted)">${avatarIcon(player.avatar)} You</div>
+        </div>
+        <div style="color:var(--muted);align-self:center;font-size:0.8rem">rounds</div>
+        <div>
+          <div style="font-size:1.8rem;font-weight:800">${bossRw}</div>
+          <div style="font-size:0.75rem;color:var(--muted)">${stage.icon} ${boss.name}</div>
+        </div>
+      </div>
+      <div class="pve-credits" style="font-size:1rem">💰 Credits: ${pve.credits}</div>
+      ${playerWon
+        ? `<button class="btn btn-gold btn-large" onclick="renderPveCamp()">Continue →</button>`
+        : `<div class="btn-row">
+            <button class="btn btn-primary" onclick="restartPveCampaign()">Try Again</button>
+            <button class="btn btn-secondary" onclick="renderMenu()">Main Menu</button>
+           </div>`}
+    </div>
+  `);
+  showScreen('screen-result');
+}
+
+function restartPveCampaign() {
+  clearPveProgress();
+  clearSave();
+  startPveSetup();
+}
+
+function isBossActingInPve() {
+  const m = gameState.currentMatch;
+  if (!m || !gameState.pve) return false;
+  const pve = gameState.pve;
+  const { phase } = m;
+  if (phase === 'declare_1' || phase === 'declare_2' || phase === 'declare_reveal' || phase === 'round_end' || phase === 'match_end') return false;
+  const attacker = getAttacker();
+  const defender = getDefender();
+  if ((phase === 'attack_coin' || phase === 'attack_roll') && attacker.id !== pve.playerId) return true;
+  if ((phase === 'defend_coin' || phase === 'defend_roll') && defender.id !== pve.playerId) return true;
+  return false;
+}
+
+function autoPlayBossIfNeeded() {
+  if (gameState.mode !== 'pve') return;
+  if (pveAutoPlayTimer) { clearTimeout(pveAutoPlayTimer); pveAutoPlayTimer = null; }
+  if (!isBossActingInPve()) return;
+  pveAutoPlayTimer = setTimeout(() => {
+    pveAutoPlayTimer = null;
+    if (gameState.mode === 'pve' && gameState.currentMatch) handleFightAction();
+  }, 900);
 }
 
 // ── HOW TO PLAY ───────────────────────────────────────────────────────────────
