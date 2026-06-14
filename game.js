@@ -261,7 +261,7 @@ function doDefendCoin() {
 
   if (coin === 'tails') {
     addLog(`${defender.name} defends — TAILS! Defense fails.`, 'tails');
-    let dmg = m.attackValue;
+    let dmg = m.attackValue * DMG_MULTIPLIER;
     dmg = applyDmgMods(dmg, attacker, defender, m);
     dealDamage(defender, dmg, m);
     return { coin };
@@ -293,8 +293,8 @@ function doDefendRoll() {
     return { roll, blocked: true };
   }
 
-  const base = m.attackValue - roll;
-  addLog(`${defender.name} rolls ${roll} — hit! ${m.attackValue} − ${roll} = ${base} base damage.`, 'normal');
+  const base = (m.attackValue - roll) * DMG_MULTIPLIER;
+  addLog(`${defender.name} rolls ${roll} — hit! (${m.attackValue} − ${roll}) × ${DMG_MULTIPLIER} = ${base} base damage.`, 'normal');
   let dmg = applyDmgMods(base, attacker, defender, m);
   dealDamage(defender, dmg, m);
   return { roll, damage: dmg };

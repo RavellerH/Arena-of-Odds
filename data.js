@@ -1,8 +1,9 @@
 const MAX_LP = 500;
 const BERSERKER_THRESHOLD = 200;
-const IRON_GUARD_REFLECT = 3;
+const IRON_GUARD_REFLECT = 30;
 const PERFECT_HIT_VALUE = 9;
-const MYSTIC_HEAL_AMOUNT = 10;
+const MYSTIC_HEAL_AMOUNT = 50;
+const DMG_MULTIPLIER = 10;
 
 const AVATARS = [
   { id: 'warrior',     icon: '⚔️',  label: 'Warrior'     },
