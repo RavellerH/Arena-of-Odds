@@ -12,13 +12,13 @@ const WARRIOR_MAX_LP    = 250;
 const MAGE_SPELLPOWER   = 10;
 const PALADIN_SHIELD    = 10;
 const WAR_CRY_BONUS     = 5;
-const HEALER_REJUV      = 15;
+const HEALER_REJUV      = 10;
 const NECRO_DRAIN_PCT   = 0.30;
 
 // Scaling passive constants (passive grows each round)
 const WARRIOR_LP_SCALE     = 10;
 const PALADIN_SHIELD_SCALE = 2;
-const HEALER_REJUV_SCALE   = 2;
+const HEALER_REJUV_SCALE   = 1;
 const NECRO_DRAIN_SCALE    = 0.05;
 const NECRO_DRAIN_CAP      = 0.50;
 
@@ -87,7 +87,7 @@ const AVATAR_PASSIVES = {
     name: 'Rejuvenation',
     icon: '💊',
     color: '#34d399',
-    description: `Recover ${HEALER_REJUV} LP at start of your first attack turn each round (+ ${HEALER_REJUV_SCALE}/round).`,
+    description: `Recover ${HEALER_REJUV} LP at start of your first attack turn each round (+${HEALER_REJUV_SCALE}/round).`,
     type: 'once_round',
   },
   archer: {

@@ -56,20 +56,20 @@ function hpPct(lp, maxLp = MAX_LP) {
 
 function renderSkillBadge(skillId) {
   const s = skillData(skillId);
-  return `<span class="skill-badge" style="color:${s.color};border-color:${s.color}">${s.icon} ${s.name}</span>`;
+  return `<span class="skill-badge clickable" style="color:${s.color};border-color:${s.color}" onclick="showSkillPopup('skill','${skillId}')">${s.icon} ${s.name}</span>`;
 }
 
 function renderPassiveBadge(avatarId) {
   const p = AVATAR_PASSIVES[avatarId];
   if (!p) return '';
-  return `<span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color}" title="${p.description}">${p.icon} ${p.name}</span>`;
+  return `<span class="skill-badge passive-badge clickable" style="color:${p.color};border-color:${p.color}" onclick="showSkillPopup('passive','${avatarId}')">${p.icon} ${p.name}</span>`;
 }
 
 function renderStanceBadge(stanceId) {
   if (!stanceId) return '';
   const s = STANCES[stanceId];
   if (!s) return '';
-  return `<span class="skill-badge stance-badge" style="color:${s.color};border-color:${s.color}">${s.icon} ${s.name}</span>`;
+  return `<span class="skill-badge stance-badge clickable" style="color:${s.color};border-color:${s.color}" onclick="showSkillPopup('stance','${stanceId}')">${s.icon} ${s.name}</span>`;
 }
 
 function renderPips(wins, maxRounds) {
@@ -583,6 +583,8 @@ function renderFight(matchTitle, context) {
   // ── Main central element ──
   let mainEl, roleLabel, actionLabel, actionBtn;
 
+  const bossActing = isBossActingInPve();
+
   if (isCoinPhase) {
     const coinResult = phase === 'attack_coin' ? uiState.attackCoin : uiState.defendCoin;
     const coinText = coinResult === 'heads' ? 'HEADS' : coinResult === 'tails' ? 'TAILS' : '?';
@@ -592,10 +594,12 @@ function renderFight(matchTitle, context) {
     actionLabel = phase === 'attack_coin'
       ? (shadowActive ? '🌑 Shadow Blitz — Attack coin is auto-HEADS!' : 'Flip your attack coin')
       : (eagleTailsActive ? '🦅 Eagle Eye — Defense coin is forced TAILS!' : 'Flip your defense coin');
-    const btnLabel = phase === 'attack_coin'
-      ? (shadowActive ? '🌑 Shadow Blitz!' : `🪙 Flip — ${escapeHtml(actor.name)}`)
-      : (eagleTailsActive ? `🦅 Eagle Eye!` : `🪙 Flip — ${escapeHtml(actor.name)}`);
-    actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">${btnLabel}</button>`;
+    const coinIcon = phase === 'attack_coin' ? (shadowActive ? '🌑' : '🪙') : (eagleTailsActive ? '🦅' : '🛡️');
+    const isSpecialCoin = (phase === 'attack_coin' && shadowActive) || (phase === 'defend_coin' && eagleTailsActive);
+    actionBtn = `<button class="btn-action-circle btn-primary${bossActing ? ' pulsing' : ''}" onclick="handleFightAction()" ${bossActing ? 'disabled' : ''}>
+      <span class="btn-action-icon">${coinIcon}</span>
+      <span class="btn-action-label">${bossActing ? '…' : isSpecialCoin ? 'AUTO' : escapeHtml(actor.name).slice(0, 9)}</span>
+    </button>`;
 
   } else if (isDicePhase) {
     if (phase === 'attack_roll') {
@@ -622,8 +626,9 @@ function renderFight(matchTitle, context) {
     }
     roleLabel   = phase === 'attack_roll' ? '⚔️ ATTACKER' : '🛡️ DEFENDER';
     actionLabel = phase === 'attack_roll' ? 'Roll your attack dice' : 'Roll your defense dice';
-    actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">
-      🎲 Roll — ${escapeHtml(actor.name)}
+    actionBtn = `<button class="btn-action-circle btn-primary${bossActing ? ' pulsing' : ''}" onclick="handleFightAction()" ${bossActing ? 'disabled' : ''}>
+      <span class="btn-action-icon">🎲</span>
+      <span class="btn-action-label">${bossActing ? '…' : escapeHtml(actor.name).slice(0, 9)}</span>
     </button>`;
 
   } else if (phase === 'round_end') {
@@ -666,7 +671,10 @@ function renderFight(matchTitle, context) {
   setHTML('screen-fight', `
     <div class="fight-header">
       <span class="match-title">${escapeHtml(matchTitle || 'Match')}</span>
-      <span class="round-info">Round ${m.round} / ${maxRounds}</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="round-info">Round ${m.round} / ${maxRounds}</span>
+        <button class="btn-info" onclick="showInfoPanel()" title="Skills Guide">?</button>
+      </div>
     </div>
 
     <div class="fighters-row">
@@ -682,7 +690,7 @@ function renderFight(matchTitle, context) {
           ${renderPassiveBadge(f1.avatar)}
           ${renderStanceBadge(m.stances[f1.id])}
         </div>
-        ${u1 ? `<div class="ult-indicator ${f1Ready ? 'ult-ready' : 'ult-charging'}" style="${f1Ready ? `color:${u1.color}` : ''}">
+        ${u1 ? `<div class="ult-indicator clickable ${f1Ready ? 'ult-ready' : 'ult-charging'}" style="${f1Ready ? `color:${u1.color}` : ''}" onclick="showSkillPopup('ult','${f1.avatar}')">
           ${f1Ready ? `${u1.icon} Ult Ready` : `⚡ ${'●'.repeat(f1Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f1Charges)} Charging`}
         </div>` : ''}
       </div>
@@ -698,7 +706,7 @@ function renderFight(matchTitle, context) {
           ${renderPassiveBadge(f2.avatar)}
           ${renderStanceBadge(m.stances[f2.id])}
         </div>
-        ${u2 ? `<div class="ult-indicator ${f2Ready ? 'ult-ready' : 'ult-charging'}" style="${f2Ready ? `color:${u2.color}` : ''}">
+        ${u2 ? `<div class="ult-indicator clickable ${f2Ready ? 'ult-ready' : 'ult-charging'}" style="${f2Ready ? `color:${u2.color}` : ''}" onclick="showSkillPopup('ult','${f2.avatar}')">
           ${f2Ready ? `${u2.icon} Ult Ready` : `⚡ ${'●'.repeat(f2Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f2Charges)} Charging`}
         </div>` : ''}
       </div>
@@ -708,7 +716,7 @@ function renderFight(matchTitle, context) {
       <div class="turn-header">
         <div class="turn-role">${roleLabel}</div>
         ${!isEndPhase ? `<div class="turn-name">${escapeHtml(actor.name)}</div>` : ''}
-        <div class="turn-action">${isBossActingInPve() ? '⏳ Boss is acting…' : actionLabel}</div>
+        <div class="turn-action">${bossActing ? '⏳ Boss is acting…' : actionLabel}</div>
       </div>
 
       <div class="ctx-chips">${chips}</div>
@@ -716,8 +724,8 @@ function renderFight(matchTitle, context) {
       ${mainEl}
 
       <div class="action-btns">
-        ${actionBtn}
         ${ultBtn}
+        ${actionBtn}
       </div>
     </div>
 
@@ -1429,6 +1437,125 @@ function renderHowToPlay() {
     </div>
   `);
   showScreen('screen-howtoplay');
+}
+
+// ── SKILL POPUP ───────────────────────────────────────────────────────────────
+
+function showSkillPopup(type, id) {
+  const m = gameState.currentMatch;
+  let icon, name, color, typeLabel, desc, statusHtml = '';
+
+  if (type === 'skill') {
+    const s = SKILLS[id];
+    if (!s) return;
+    icon = s.icon; name = s.name; color = s.color;
+    typeLabel = 'Skill';
+    desc = s.description;
+    if (m) {
+      const fighter = gameState.fighters.find(f => fighterHasSkill(f, id));
+      if (fighter) {
+        const lines = [];
+        if (id === 'gamblers_edge') lines.push(m.gamblerUsed[fighter.id] ? '✓ Reroll used this round' : '● Reroll available');
+        if (id === 'mystic_heal')   lines.push(m.mysticUsed[fighter.id]  ? '✓ Heal used this round'   : '● Heal available');
+        if (lines.length) statusHtml = `<div class="popup-status">${lines.join(' · ')}</div>`;
+      }
+    }
+  } else if (type === 'passive') {
+    const p = AVATAR_PASSIVES[id];
+    const av = AVATARS.find(a => a.id === id);
+    if (!p) return;
+    icon = p.icon; name = p.name; color = p.color;
+    typeLabel = `${av ? av.label : id} Passive`;
+    desc = p.description;
+  } else if (type === 'ult') {
+    const u = ULTIMATES[id];
+    const av = AVATARS.find(a => a.id === id);
+    if (!u) return;
+    icon = u.icon; name = u.name; color = u.color;
+    typeLabel = `${av ? av.label : id} Ultimate · ${u.timing}`;
+    desc = u.desc;
+    if (m) {
+      const fighter = gameState.fighters.find(f => f.avatar === id);
+      if (fighter) {
+        const ready   = m.ultReady && m.ultReady[fighter.id];
+        const charges = (m.ultCharges && m.ultCharges[fighter.id]) || 0;
+        statusHtml = `<div class="popup-status">${ready ? '⚡ Ready to use' : `Charging: ${'●'.repeat(charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - charges)} (${ULT_TAILS_TO_RECHARGE} TAILS needed)`}</div>`;
+      }
+    }
+  } else if (type === 'stance') {
+    const s = STANCES[id];
+    if (!s) return;
+    icon = s.icon; name = s.name; color = s.color;
+    typeLabel = 'Stance';
+    desc = s.desc;
+  }
+
+  const el = document.getElementById('skill-popup');
+  el.innerHTML = `
+    <div class="popup-backdrop" onclick="closeSkillPopup()">
+      <div class="popup-card" onclick="event.stopPropagation()" style="border-color:${color}44">
+        <div class="popup-icon">${icon}</div>
+        <div class="popup-name" style="color:${color}">${name}</div>
+        <div class="popup-type-tag">${typeLabel}</div>
+        <div class="popup-desc">${desc}</div>
+        ${statusHtml}
+        <button class="btn btn-secondary" style="margin-top:4px;width:100%" onclick="closeSkillPopup()">Close</button>
+      </div>
+    </div>`;
+  el.classList.add('visible');
+}
+
+function closeSkillPopup() {
+  const el = document.getElementById('skill-popup');
+  if (el) { el.classList.remove('visible'); el.innerHTML = ''; }
+}
+
+function showInfoPanel() {
+  const skillsHtml = SKILL_IDS.map(sid => {
+    const s = SKILLS[sid];
+    return `<div class="info-row" onclick="closeSkillPopup();showSkillPopup('skill','${sid}')">
+      <div class="info-row-name" style="color:${s.color}">${s.icon} ${s.name}</div>
+      <div class="info-row-desc">${s.description}</div>
+    </div>`;
+  }).join('');
+
+  const stancesHtml = STANCE_IDS.map(sid => {
+    const s = STANCES[sid];
+    return `<div class="info-row" onclick="closeSkillPopup();showSkillPopup('stance','${sid}')">
+      <div class="info-row-name" style="color:${s.color}">${s.icon} ${s.name}</div>
+      <div class="info-row-desc">${s.desc}</div>
+    </div>`;
+  }).join('');
+
+  const passivestHtml = Object.entries(AVATAR_PASSIVES).map(([avId, p]) => {
+    const av = AVATARS.find(a => a.id === avId);
+    return `<div class="info-row" onclick="closeSkillPopup();showSkillPopup('passive','${avId}')">
+      <div class="info-row-name" style="color:${p.color}">${av ? av.icon : ''} ${av ? av.label : avId} — ${p.icon} ${p.name}</div>
+      <div class="info-row-desc">${p.description}</div>
+    </div>`;
+  }).join('');
+
+  const el = document.getElementById('skill-popup');
+  el.innerHTML = `
+    <div class="popup-backdrop" onclick="closeSkillPopup()">
+      <div class="popup-card popup-reference" onclick="event.stopPropagation()">
+        <h3 style="margin-bottom:4px;text-align:center">Skills Guide</h3>
+        <div class="info-section">
+          <div class="info-section-title">⚔️ Skills (choose one at setup)</div>
+          ${skillsHtml}
+        </div>
+        <div class="info-section">
+          <div class="info-section-title">⚖️ Stances (declared each round)</div>
+          ${stancesHtml}
+        </div>
+        <div class="info-section">
+          <div class="info-section-title">✨ Avatar Passives (always active)</div>
+          ${passivestHtml}
+        </div>
+        <button class="btn btn-secondary" style="margin-top:4px;width:100%" onclick="closeSkillPopup()">Close</button>
+      </div>
+    </div>`;
+  el.classList.add('visible');
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────

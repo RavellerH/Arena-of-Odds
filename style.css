@@ -157,13 +157,14 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
 .big-coin.pending { border-color: var(--muted2); color: var(--muted); }
 .big-coin.heads   { border-color: var(--accent); color: var(--accent-l); background: var(--accent-d); box-shadow: 0 0 28px var(--accent-g); }
 .big-coin.tails   { border-color: var(--muted); color: var(--muted); background: var(--bg3); }
-.big-coin.flip-anim { animation: coinFlip 0.55s ease-in-out; }
+.big-coin.flip-anim { animation: coinFlip 0.75s cubic-bezier(0.36,0.07,0.19,0.97); }
 
 @keyframes coinFlip {
-  0%   { transform: rotateY(0) scale(1); }
-  40%  { transform: rotateY(90deg) scale(0.75); }
-  41%  { transform: rotateY(-90deg) scale(0.75); }
-  100% { transform: rotateY(0) scale(1); }
+  0%   { transform: scale(1) rotateY(0deg);    filter: brightness(1); }
+  10%  { transform: scale(1.12) rotateY(0deg); filter: brightness(1.4); }
+  45%  { transform: scale(1.1) rotateY(540deg); filter: brightness(1.6); }
+  75%  { transform: scale(1.04) rotateY(1080deg); filter: brightness(1.2); }
+  100% { transform: scale(1) rotateY(1080deg);  filter: brightness(1); }
 }
 
 .big-dice {
@@ -176,14 +177,17 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
   user-select: none;
 }
 .big-dice.rolled { border-color: var(--accent); background: var(--accent-d); box-shadow: 0 0 24px var(--accent-g); }
-.big-dice.roll-anim { animation: diceRoll 0.5s ease-in-out; }
+.big-dice.roll-anim,
+.big-dice-pair.roll-anim { animation: diceRoll 0.65s cubic-bezier(0.36,0.07,0.19,0.97); }
 
 @keyframes diceRoll {
-  0%   { transform: rotate(0) scale(1); }
-  20%  { transform: rotate(-18deg) scale(1.2); }
-  40%  { transform: rotate(14deg) scale(0.9); }
-  70%  { transform: rotate(-7deg) scale(1.05); }
-  100% { transform: rotate(0) scale(1); }
+  0%   { transform: translate(0,0) rotate(0deg) scale(1); filter: brightness(1); }
+  12%  { transform: translate(-4px,-10px) rotate(-28deg) scale(1.22); filter: brightness(1.5); }
+  28%  { transform: translate(6px,-14px) rotate(38deg) scale(1.28); filter: brightness(1.6); }
+  48%  { transform: translate(-3px,-7px) rotate(-18deg) scale(1.14); filter: brightness(1.3); }
+  68%  { transform: translate(3px,-3px) rotate(10deg) scale(1.07); filter: brightness(1.1); }
+  84%  { transform: translate(-1px,-1px) rotate(-4deg) scale(1.02); filter: brightness(1); }
+  100% { transform: translate(0,0) rotate(0deg) scale(1); filter: brightness(1); }
 }
 
 /* ── 2d6 attack dice pair ────────────────────────────────────── */
@@ -427,6 +431,51 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
 .ult-used     { color: var(--muted2); }
 .ult-charging { color: var(--muted); letter-spacing: 0.06em; }
 
+/* ── Circle action button (Flip / Roll) ──────────────────────── */
+.btn-action-circle {
+  width: 90px; height: 90px; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 0; border: none; cursor: pointer;
+  font-family: inherit; transition: all 0.18s ease;
+  position: relative; overflow: hidden;
+}
+.btn-action-circle:disabled { opacity: 0.4; pointer-events: none; }
+.btn-action-circle.btn-primary {
+  background: var(--accent);
+  box-shadow: 0 0 0 5px var(--accent-d), 0 6px 24px var(--accent-g);
+}
+.btn-action-circle.btn-primary:hover {
+  background: var(--accent-l);
+  box-shadow: 0 0 0 8px var(--accent-d), 0 8px 32px rgba(139,92,246,0.5);
+  transform: translateY(-3px) scale(1.06);
+}
+.btn-action-circle.btn-primary:active { transform: scale(0.96); }
+.btn-action-icon  { font-size: 2.2rem; line-height: 1; pointer-events: none; }
+.btn-action-label {
+  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgba(255,255,255,0.75); pointer-events: none; max-width: 72px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* pulse ring while boss is acting */
+.btn-action-circle.pulsing::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid var(--accent-l); opacity: 0;
+  animation: ringPulse 1.2s ease-out infinite;
+}
+@keyframes ringPulse {
+  0%   { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+/* ── Info button (fight header) ──────────────────────────────── */
+.btn-info {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  font-size: 0.75rem; font-weight: 800; cursor: pointer; transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.btn-info:hover { border-color: var(--accent); color: var(--accent-l); }
+
 /* ── Action button group (action + optional ultimate) ────────── */
 .action-btns {
   display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%;
@@ -466,6 +515,69 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
   0%   { transform: scale(0); }
   100% { transform: scale(1); }
 }
+
+/* ── Skill info popup ────────────────────────────────────────── */
+#skill-popup {
+  display: none; position: fixed; inset: 0; z-index: 1000;
+  align-items: flex-end; justify-content: center;
+}
+#skill-popup.visible { display: flex; }
+.popup-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.72); backdrop-filter: blur(5px);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding-bottom: 20px;
+}
+.popup-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 18px 18px 14px 14px; padding: 24px 20px 20px;
+  max-width: 360px; width: 94%;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center; position: relative; z-index: 1;
+  animation: slideUp 0.28s cubic-bezier(0.17, 0.67, 0.3, 1.2);
+}
+@keyframes slideUp {
+  0%   { transform: translateY(40px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.popup-icon     { font-size: 2.6rem; margin-bottom: 2px; }
+.popup-name     { font-size: 1.1rem; font-weight: 800; }
+.popup-type-tag {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted); background: var(--bg3); padding: 2px 8px; border-radius: 10px;
+}
+.popup-desc     { font-size: 0.86rem; color: var(--text); line-height: 1.75; }
+.popup-status   {
+  font-size: 0.75rem; color: var(--muted); padding: 5px 12px;
+  border-radius: 20px; background: var(--bg3); border: 1px solid var(--border);
+}
+/* Scrollable reference panel */
+.popup-reference {
+  text-align: left; max-height: 78vh; overflow-y: auto; gap: 14px;
+  align-items: stretch;
+}
+.popup-reference::-webkit-scrollbar { width: 3px; }
+.popup-reference::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 2px; }
+.info-section { display: flex; flex-direction: column; gap: 0; }
+.info-section-title {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+  padding: 4px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+.info-row {
+  padding: 9px 4px; border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer; transition: background 0.12s; border-radius: 6px;
+}
+.info-row:hover { background: rgba(255,255,255,0.04); padding-left: 8px; }
+.info-row-name  { font-size: 0.84rem; font-weight: 700; margin-bottom: 2px; }
+.info-row-desc  { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+
+/* Clickable badges */
+.skill-badge.clickable { cursor: pointer; transition: filter 0.15s, transform 0.1s; }
+.skill-badge.clickable:hover { filter: brightness(1.3); transform: scale(1.04); }
+
+/* Clickable ult indicator */
+.ult-indicator.clickable { cursor: pointer; transition: opacity 0.15s; text-decoration: underline dotted; }
+.ult-indicator.clickable:hover { opacity: 0.75; }
 
 /* ── Declare screen ──────────────────────────────────────────── */
 .declare-screen {
