@@ -47,13 +47,19 @@ function hpClass(lp) {
   return '';
 }
 
-function hpPct(lp) {
-  return Math.max(0, Math.round((lp / MAX_LP) * 100));
+function hpPct(lp, maxLp = MAX_LP) {
+  return Math.max(0, Math.round((lp / maxLp) * 100));
 }
 
 function renderSkillBadge(skillId) {
   const s = skillData(skillId);
   return `<span class="skill-badge" style="color:${s.color};border-color:${s.color}">${s.icon} ${s.name}</span>`;
+}
+
+function renderPassiveBadge(avatarId) {
+  const p = AVATAR_PASSIVES[avatarId];
+  if (!p) return '';
+  return `<span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color}" title="${p.description}">${p.icon} ${p.name}</span>`;
 }
 
 function renderPips(wins, maxRounds) {
@@ -64,12 +70,12 @@ function renderPips(wins, maxRounds) {
   return html;
 }
 
-function renderHpBar(lp) {
+function renderHpBar(lp, maxLp = MAX_LP) {
   const cls = hpClass(lp);
   return `
     <div class="hp-bar-wrap">
-      <div class="hp-bar-label"><span>LP</span><span>${lp}</span></div>
-      <div class="hp-bar-track"><div class="hp-bar-fill ${cls}" style="width:${hpPct(lp)}%"></div></div>
+      <div class="hp-bar-label"><span>LP</span><span>${lp} / ${maxLp}</span></div>
+      <div class="hp-bar-track"><div class="hp-bar-fill ${cls}" style="width:${hpPct(lp, maxLp)}%"></div></div>
     </div>`;
 }
 
@@ -453,8 +459,11 @@ function renderFight(matchTitle, context) {
           <span class="fighter-name">${escapeHtml(f1.name)}</span>
           <div class="fighter-pips round-pips">${renderPips(f1.roundWins, maxRounds)}</div>
         </div>
-        ${renderHpBar(f1.lp)}
-        <div style="margin-top:8px">${renderSkillBadge(f1.skill)}</div>
+        ${renderHpBar(f1.lp, f1.maxLp)}
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+          ${renderSkillBadge(f1.skill)}
+          ${renderPassiveBadge(f1.avatar)}
+        </div>
       </div>
       <div class="fighter-panel ${f2Active}">
         <div class="fighter-name-row">
@@ -462,8 +471,11 @@ function renderFight(matchTitle, context) {
           <span class="fighter-name">${escapeHtml(f2.name)}</span>
           <div class="fighter-pips round-pips">${renderPips(f2.roundWins, maxRounds)}</div>
         </div>
-        ${renderHpBar(f2.lp)}
-        <div style="margin-top:8px">${renderSkillBadge(f2.skill)}</div>
+        ${renderHpBar(f2.lp, f2.maxLp)}
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+          ${renderSkillBadge(f2.skill)}
+          ${renderPassiveBadge(f2.avatar)}
+        </div>
       </div>
     </div>
 
@@ -728,7 +740,10 @@ function renderWinner(fighterId) {
       <div class="winner-avatar">${avatarIcon(f.avatar)}</div>
       <h1>${escapeHtml(f.name)}</h1>
       <h2 style="color:var(--gold)">${title}</h2>
-      ${renderSkillBadge(f.skill)}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
+        ${renderSkillBadge(f.skill)}
+        ${renderPassiveBadge(f.avatar)}
+      </div>
       <p style="color:var(--muted);max-width:300px;line-height:1.7">The arena falls silent.<br>The odds were defied.</p>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn btn-primary btn-large" onclick="goNewGame()">New Tournament</button>
@@ -778,9 +793,23 @@ function renderHowToPlay() {
       </div>
 
       <div class="card howto-section">
+        <h3>Avatars &amp; Passives</h3>
+        <div class="skills-list">
+          ${Object.entries(AVATAR_PASSIVES).map(([id, p]) => {
+            const av = AVATARS.find(a => a.id === id);
+            return `<div class="log-line" style="padding:5px 0;color:var(--text)">
+              <span style="color:${p.color}">${av ? av.icon : ''} <strong>${av ? av.label : id}</strong></span>
+              <span class="skill-badge passive-badge" style="color:${p.color};border-color:${p.color};margin:0 4px">${p.icon} ${p.name}</span>
+              — ${p.description}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="card howto-section">
         <h3>Match Rules</h3>
         <ul>
-          <li>Each fighter starts at <strong>500 LP</strong> per round.</li>
+          <li>Fighters start at <strong>500 LP</strong> per round (Warrior: 600 LP).</li>
           <li>First to drop opponent to 0 LP wins the round.</li>
           <li>Regular matches: Best of 3. Finals: Best of 5.</li>
           <li>Loser of each round attacks first next round.</li>
