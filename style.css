@@ -467,6 +467,25 @@ h3 { font-size: 1rem; font-weight: 700; color: var(--accent-l); }
   100% { transform: scale(1.4); opacity: 0; }
 }
 
+/* ── Auto mode toggle ────────────────────────────────────────── */
+.btn-auto-toggle {
+  padding: 5px 14px; border-radius: 20px;
+  font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  cursor: pointer; transition: all 0.18s;
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  font-family: inherit;
+}
+.btn-auto-toggle:hover { border-color: var(--accent); color: var(--accent-l); }
+.btn-auto-toggle.active {
+  background: rgba(139,92,246,0.12); border-color: var(--accent); color: var(--accent-l);
+  box-shadow: 0 0 10px rgba(139,92,246,0.2);
+  animation: autoPulse 1.5s ease-in-out infinite;
+}
+@keyframes autoPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(139,92,246,0.2); }
+  50%       { box-shadow: 0 0 18px rgba(139,92,246,0.45); }
+}
+
 /* ── Info button (fight header) ──────────────────────────────── */
 .btn-info {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;

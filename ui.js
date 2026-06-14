@@ -19,6 +19,7 @@ const uiState = {
   defendDice: null,
   isLeagueFinal: false,
   cupIsFinal: false,
+  autoMode: false,
 };
 
 // ── Screen manager ────────────────────────────────────────────────────────────
@@ -726,6 +727,9 @@ function renderFight(matchTitle, context) {
       <div class="action-btns">
         ${ultBtn}
         ${actionBtn}
+        ${!isEndPhase ? `<button class="btn-auto-toggle ${uiState.autoMode ? 'active' : ''}" onclick="toggleAutoMode()">
+          ⚡ Auto ${uiState.autoMode ? 'ON' : 'OFF'}
+        </button>` : ''}
       </div>
     </div>
 
@@ -788,6 +792,7 @@ function useUltimate() {
 function rerenderFight() {
   renderFight(gameState.currentMatch._title, gameState.currentMatch._context);
   autoPlayBossIfNeeded();
+  triggerAutoModeIfNeeded();
 }
 
 function animateEl(id, cls) {
@@ -1073,6 +1078,30 @@ function renderWinner(fighterId) {
     </div>
   `);
   showScreen('screen-winner');
+}
+
+// ── AUTO MODE ─────────────────────────────────────────────────────────────────
+
+let autoModeTimer = null;
+
+function toggleAutoMode() {
+  uiState.autoMode = !uiState.autoMode;
+  if (autoModeTimer) { clearTimeout(autoModeTimer); autoModeTimer = null; }
+  rerenderFight();
+}
+
+function triggerAutoModeIfNeeded() {
+  if (!uiState.autoMode) return;
+  if (!gameState.currentMatch) return;
+  const phase = gameState.currentMatch.phase;
+  const autoPhases = ['attack_coin', 'attack_roll', 'defend_coin', 'defend_roll'];
+  if (!autoPhases.includes(phase)) return;
+  if (isBossActingInPve()) return; // don't double-fire with PVE boss auto
+  if (autoModeTimer) { clearTimeout(autoModeTimer); autoModeTimer = null; }
+  autoModeTimer = setTimeout(() => {
+    autoModeTimer = null;
+    if (uiState.autoMode && gameState.currentMatch) handleFightAction();
+  }, 750);
 }
 
 // ── PVE CAMPAIGN ─────────────────────────────────────────────────────────────
