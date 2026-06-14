@@ -155,7 +155,7 @@ const SKILL_IDS = Object.keys(SKILLS);
 const STANCES = {
   assault:  { id: 'assault',  icon: '⚔️', name: 'Assault',  color: '#f87171', desc: `Deal +${ASSAULT_BONUS} bonus damage on all hits this round.` },
   counter:  { id: 'counter',  icon: '🛡️', name: 'Counter',  color: '#60a5fa', desc: `On a successful block, deal ${COUNTER_DMG} counter-damage to attacker.` },
-  balanced: { id: 'balanced', icon: '⚖️', name: 'Balanced', color: '#9ca3af', desc: 'No modifier — standard round.' },
+  balanced: { id: 'balanced', icon: '⚖️', name: 'Balanced', color: '#9ca3af', desc: 'Recover 30 LP at the start of your attack turn. Defense coins cannot be forced TAILS by abilities.' },
 };
 
 const STANCE_IDS = Object.keys(STANCES);
@@ -193,7 +193,7 @@ const ULTIMATES = {
     name: 'Blood Rage',
     icon: '💢',
     color: '#fb923c',
-    desc: 'All damage you deal this round is doubled.',
+    desc: 'Every hit you land this round deals +80 bonus damage (flat, not multiplicative).',
     timing: 'Round Enhancement',
   },
   healer: {

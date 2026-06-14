@@ -314,6 +314,17 @@ function doAttackCoin() {
   const attacker = getAttacker();
   const m = gameState.currentMatch;
 
+  // Balanced stance: recover 30 LP at attack turn start (once per round per fighter)
+  const balancedKey = attacker.id + '_balanced_heal';
+  if (m.stances[attacker.id] === 'balanced' && !m.passiveUsed[balancedKey]) {
+    m.passiveUsed[balancedKey] = true;
+    const healed = Math.min(30, attacker.maxLp - attacker.lp);
+    if (healed > 0) {
+      attacker.lp += healed;
+      addLog(`⚖️ Balanced! ${attacker.name} recovers ${healed} LP → ${attacker.lp}`, 'stance');
+    }
+  }
+
   // Healer Rejuvenation: scale with round number
   const rejuvKey = attacker.id + '_rejuv';
   if (attacker.avatar === 'healer' && !m.passiveUsed[rejuvKey]) {
@@ -426,14 +437,19 @@ function doAttackRoll() {
     addLog(`✨ Spellpower! +${MAGE_SPELLPOWER} bonus damage.`, 'passive');
   }
 
-  // Rogue Assassination: first roll 6 bypasses defender coin
+  // Rogue Assassination: first roll 6 bypasses defender coin (Balanced stance resists)
   const assKey = attacker.id + '_assassination';
   if (attacker.avatar === 'rogue' && baseRoll === 6 && !m.passiveUsed[assKey]) {
-    m.passiveUsed[assKey] = true;
-    addLog(`🗡️ Assassination! ${defender.name}'s defense coin bypassed!`, 'passive');
-    m.attackValue = attackValue;
-    m.phase = 'defend_roll';
-    return { roll: baseRoll, attackValue, assassination: true, explosionBonus };
+    if (m.stances[defender.id] === 'balanced') {
+      m.passiveUsed[assKey] = true; // mark used so it doesn't retry
+      addLog(`⚖️ Balanced! ${defender.name} resists Assassination — defense coin proceeds normally.`, 'stance');
+    } else {
+      m.passiveUsed[assKey] = true;
+      addLog(`🗡️ Assassination! ${defender.name}'s defense coin bypassed!`, 'passive');
+      m.attackValue = attackValue;
+      m.phase = 'defend_roll';
+      return { roll: baseRoll, attackValue, assassination: true, explosionBonus };
+    }
   }
 
   m.attackValue = attackValue;
@@ -445,16 +461,36 @@ function doDefendCoin() {
   const defender = getDefender();
   const attacker = getAttacker();
   const m = gameState.currentMatch;
+  const defenderBalanced = m.stances[defender.id] === 'balanced';
 
-  // Eagle Eye: force TAILS on defender's coin
+  // Eagle Eye: force TAILS on defender's coin (Balanced resists)
   const eagleTailsKey = attacker.id + '_eagleeye_tails';
   if (m.ultFlags[eagleTailsKey]) {
     delete m.ultFlags[eagleTailsKey];
-    addLog(`🦅 Eagle Eye! ${defender.name}'s defense coin forced TAILS!`, 'ultimate');
-    let dmg = m.attackValue * DMG_MULTIPLIER;
-    dmg = applyDmgMods(dmg, attacker, defender, m);
-    dealDamage(defender, attacker, dmg, m);
-    return { coin: 'tails', eagleEye: true };
+    if (defenderBalanced) {
+      addLog(`⚖️ Balanced! ${defender.name} resists Eagle Eye — coin flips normally.`, 'stance');
+    } else {
+      addLog(`🦅 Eagle Eye! ${defender.name}'s defense coin forced TAILS!`, 'ultimate');
+      let dmg = m.attackValue * DMG_MULTIPLIER;
+      dmg = applyDmgMods(dmg, attacker, defender, m);
+      dealDamage(defender, attacker, dmg, m);
+      return { coin: 'tails', eagleEye: true };
+    }
+  }
+
+  // Shadow Blitz: force TAILS on defender's coin (Balanced resists)
+  const shadowKey = attacker.id + '_shadowblitz';
+  if (m.ultFlags[shadowKey]) {
+    delete m.ultFlags[shadowKey];
+    if (defenderBalanced) {
+      addLog(`⚖️ Balanced! ${defender.name} resists Shadow Blitz — coin flips normally.`, 'stance');
+    } else {
+      addLog(`🌑 Shadow Blitz! ${defender.name}'s defense coin forced TAILS!`, 'ultimate');
+      let dmg = m.attackValue * DMG_MULTIPLIER;
+      dmg = applyDmgMods(dmg, attacker, defender, m);
+      dealDamage(defender, attacker, dmg, m);
+      return { coin: 'tails', shadowBlitz: true };
+    }
   }
 
   const coin = flipCoin();
@@ -577,11 +613,11 @@ function applyDmgMods(dmg, attacker, defender, m) {
     addLog(`⚔️ Assault! +${ASSAULT_BONUS} bonus damage → ${dmg}`, 'stance');
   }
 
-  // Ultimate: Blood Rage
+  // Ultimate: Blood Rage — flat bonus, does not multiply (prevents stacking with Double Strike)
   const rageKey = attacker.id + '_bloodrage';
   if (m.ultFlags[rageKey]) {
-    dmg *= 2;
-    addLog(`💢 Blood Rage! Damage ×2 → ${dmg}`, 'ultimate');
+    dmg += 80;
+    addLog(`💢 Blood Rage! +80 damage → ${dmg}`, 'ultimate');
   }
 
   return dmg;

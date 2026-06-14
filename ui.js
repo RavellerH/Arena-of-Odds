@@ -657,8 +657,8 @@ function handleFightAction() {
     animateEl('fight-dice', 'roll-anim');
 
   } else if (phase === 'defend_coin') {
-    const { coin, eagleEye } = doDefendCoin();
-    uiState.defendCoin = eagleEye ? 'tails' : coin;
+    const result = doDefendCoin();
+    uiState.defendCoin = (result.eagleEye || result.shadowBlitz) ? 'tails' : result.coin;
     if (m.phase !== 'defend_roll') clearFightDisplay();
     rerenderFight();
     animateEl('fight-coin', 'flip-anim');
