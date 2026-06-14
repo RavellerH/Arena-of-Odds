@@ -1,33 +1,40 @@
-const MAX_LP = 500;
-const BERSERKER_THRESHOLD = 200;
-const IRON_GUARD_REFLECT = 30;
-const PERFECT_HIT_VALUE = 9;
-const MYSTIC_HEAL_AMOUNT = 50;
-const DMG_MULTIPLIER = 10;
+const MAX_LP = 200;
+const BERSERKER_THRESHOLD = 80;
+const IRON_GUARD_REFLECT = 15;
+const PERFECT_HIT_TRIGGER = 4;    // sum ≤ this triggers Perfect Hit
+const PERFECT_HIT_VALUE = 10;
+const MYSTIC_HEAL_AMOUNT = 25;
+const DMG_MULTIPLIER = 6;
+const EXPLOSION_TRIGGER = 11;     // 2d6 sum ≥ this explodes (~8% chance)
 
 // Avatar passive base constants
-const WARRIOR_MAX_LP    = 600;
-const MAGE_SPELLPOWER   = 20;
-const PALADIN_SHIELD    = 20;
-const WAR_CRY_BONUS     = 10;
-const HEALER_REJUV      = 30;
+const WARRIOR_MAX_LP    = 250;
+const MAGE_SPELLPOWER   = 10;
+const PALADIN_SHIELD    = 10;
+const WAR_CRY_BONUS     = 5;
+const HEALER_REJUV      = 15;
 const NECRO_DRAIN_PCT   = 0.30;
 
 // Scaling passive constants (passive grows each round)
-const WARRIOR_LP_SCALE     = 25;
-const PALADIN_SHIELD_SCALE = 5;
-const HEALER_REJUV_SCALE   = 5;
+const WARRIOR_LP_SCALE     = 10;
+const PALADIN_SHIELD_SCALE = 2;
+const HEALER_REJUV_SCALE   = 2;
 const NECRO_DRAIN_SCALE    = 0.05;
 const NECRO_DRAIN_CAP      = 0.50;
 
 // Stance constants
-const ASSAULT_BONUS = 20;
-const COUNTER_DMG   = 30;
+const ASSAULT_BONUS    = 10;
+const COUNTER_DMG      = 15;
+const BALANCED_HEAL    = 15;
 
 // Ultimate constants
-const ULT_HEAL_AMOUNT    = 200;
-const ULT_PALADIN_DMG    = 100;
+const ULT_HEAL_AMOUNT    = 75;
+const ULT_PALADIN_DMG    = 40;
 const ULT_SOUL_STEAL_PCT = 0.30;
+const BLOOD_RAGE_BONUS   = 30;
+
+// Ultimate recharge system
+const ULT_TAILS_TO_RECHARGE = 2;  // TAILS on attack coin recharges ult
 
 const AVATARS = [
   { id: 'warrior',     icon: '⚔️',  label: 'Warrior'     },
@@ -52,14 +59,14 @@ const AVATAR_PASSIVES = {
     name: 'Spellpower',
     icon: '✨',
     color: '#818cf8',
-    description: `First attack roll ≥5 this round adds +${MAGE_SPELLPOWER} bonus damage.`,
+    description: `First attack sum ≥9 this round adds +${MAGE_SPELLPOWER} bonus damage.`,
     type: 'once_round',
   },
   rogue: {
     name: 'Assassination',
     icon: '🗡️',
     color: '#f43f5e',
-    description: "First attack roll of 6 this round bypasses the defender's coin flip.",
+    description: `First attack sum of ${EXPLOSION_TRIGGER}+ this round bypasses the defender's coin flip.`,
     type: 'once_round',
   },
   paladin: {
@@ -87,7 +94,7 @@ const AVATAR_PASSIVES = {
     name: 'Precision',
     icon: '🎯',
     color: '#38bdf8',
-    description: 'Attack dice rolls of 1 or 2 are treated as 3.',
+    description: `Attack sum of ${PERFECT_HIT_TRIGGER} or less is treated as 6.`,
     type: 'always',
   },
   necromancer: {
@@ -106,7 +113,7 @@ const SKILLS = {
     icon: '⚡',
     color: '#ff8c00',
     glow: '#ff8c0088',
-    description: 'Roll a 6 on attack — deal double the final damage.',
+    description: 'Roll doubles (matching dice) on attack — deal double the final damage.',
   },
   perfect_hit: {
     id: 'perfect_hit',
@@ -114,7 +121,7 @@ const SKILLS = {
     icon: '🎯',
     color: '#00d4ff',
     glow: '#00d4ff88',
-    description: 'Roll a 3 on attack — attack value becomes a fixed 9.',
+    description: `Roll a sum of ${PERFECT_HIT_TRIGGER} or less on attack — attack value becomes a fixed ${PERFECT_HIT_VALUE}.`,
   },
   iron_guard: {
     id: 'iron_guard',
@@ -122,7 +129,7 @@ const SKILLS = {
     icon: '🛡️',
     color: '#4ecdc4',
     glow: '#4ecdc488',
-    description: 'Roll a 6 on defense — negate the attack and deal 30 damage to the attacker.',
+    description: `Roll a 6 on defense — negate the attack and deal ${IRON_GUARD_REFLECT} damage to the attacker.`,
   },
   gamblers_edge: {
     id: 'gamblers_edge',
@@ -138,7 +145,7 @@ const SKILLS = {
     icon: '💚',
     color: '#22c55e',
     glow: '#22c55e88',
-    description: 'After taking damage — recover 50 LP (once per round).',
+    description: `After taking damage — recover ${MYSTIC_HEAL_AMOUNT} LP (once per round).`,
   },
   berserker: {
     id: 'berserker',
@@ -146,7 +153,7 @@ const SKILLS = {
     icon: '🔥',
     color: '#ef4444',
     glow: '#ef444488',
-    description: 'Below 200 LP — all damage dealt AND received is doubled.',
+    description: `Below ${BERSERKER_THRESHOLD} LP — all damage dealt AND received is doubled.`,
   },
 };
 
@@ -155,7 +162,7 @@ const SKILL_IDS = Object.keys(SKILLS);
 const STANCES = {
   assault:  { id: 'assault',  icon: '⚔️', name: 'Assault',  color: '#f87171', desc: `Deal +${ASSAULT_BONUS} bonus damage on all hits this round.` },
   counter:  { id: 'counter',  icon: '🛡️', name: 'Counter',  color: '#60a5fa', desc: `On a successful block, deal ${COUNTER_DMG} counter-damage to attacker.` },
-  balanced: { id: 'balanced', icon: '⚖️', name: 'Balanced', color: '#9ca3af', desc: 'Recover 30 LP at the start of your attack turn. Defense coins cannot be forced TAILS by abilities.' },
+  balanced: { id: 'balanced', icon: '⚖️', name: 'Balanced', color: '#9ca3af', desc: `Recover ${BALANCED_HEAL} LP at the start of your attack turn. Defense coins cannot be forced TAILS by abilities.` },
 };
 
 const STANCE_IDS = Object.keys(STANCES);
@@ -175,8 +182,8 @@ const PVE_STAGES = [
 
 // PVE Shop items
 const PVE_SHOP_ITEMS = [
-  { id: 'hp_boost',     name: '+100 Max LP',    icon: '❤️',  cost: 150, type: 'permanent', desc: 'Increase max LP by 100 for this run.' },
-  { id: 'dmg_boost',    name: 'Power Stone',    icon: '💪',  cost: 175, type: 'permanent', desc: 'Deal +20 flat bonus damage on every hit.' },
+  { id: 'hp_boost',     name: '+50 Max LP',     icon: '❤️',  cost: 150, type: 'permanent', desc: 'Increase max LP by 50 for this run.' },
+  { id: 'dmg_boost',    name: 'Power Stone',    icon: '💪',  cost: 175, type: 'permanent', desc: 'Deal +10 flat bonus damage on every hit.' },
   { id: 'dual_wield',   name: 'Dual Wield',     icon: '⚡',  cost: 250, type: 'permanent', desc: 'Gain a second skill that activates alongside your first.' },
   { id: 'monster_intel',name: 'Monster Intel',  icon: '🔍',  cost: 75,  type: 'run',       desc: "Reveal next boss's passive and skill before the fight." },
   { id: 'revive',       name: 'Phoenix Feather',icon: '🔥',  cost: 200, type: 'run',       desc: 'If you lose a round this match, restore to full LP once.' },
@@ -194,7 +201,7 @@ const ULTIMATES = {
     name: 'Arcane Surge',
     icon: '🌟',
     color: '#818cf8',
-    desc: 'Roll your attack die 3 times this turn and take the highest result.',
+    desc: 'Roll your attack dice 3 times this turn and take the highest sum.',
     timing: 'Turn Enhancement',
   },
   rogue: {
@@ -215,7 +222,7 @@ const ULTIMATES = {
     name: 'Blood Rage',
     icon: '💢',
     color: '#fb923c',
-    desc: 'Every hit you land this round deals +80 bonus damage (flat, not multiplicative).',
+    desc: `Every hit you land this round deals +${BLOOD_RAGE_BONUS} bonus damage (flat).`,
     timing: 'Round Enhancement',
   },
   healer: {
@@ -229,7 +236,7 @@ const ULTIMATES = {
     name: 'Eagle Eye',
     icon: '🦅',
     color: '#38bdf8',
-    desc: "Roll attack die twice this turn, take higher. Defender's defense coin forced TAILS.",
+    desc: "Roll attack dice twice this turn, take higher sum. Defender's defense coin forced TAILS.",
     timing: 'Turn Enhancement',
   },
   necromancer: {

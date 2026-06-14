@@ -197,9 +197,11 @@ function startMatch(fighter1Id, fighter2Id, maxRounds) {
     assassinActive: false,
     attackValue: 0,
     attackRoll: 0,
+    attackIsDoubles: false,
     log: [],
     stances: {},
-    ultUsed: {},
+    ultReady:   { [fighter1Id]: true, [fighter2Id]: true },
+    ultCharges: { [fighter1Id]: 0,    [fighter2Id]: 0    },
     ultFlags: {},
     warriorLpBonus: {},
   };
@@ -244,7 +246,8 @@ function doUltimate() {
   const av = attacker.avatar;
   const ult = ULTIMATES[av];
 
-  m.ultUsed[attacker.id] = true;
+  m.ultReady[attacker.id]   = false;
+  m.ultCharges[attacker.id] = 0;
   addLog(`💥 ${attacker.name} unleashes ${ult.icon} ${ult.name}!`, 'ultimate');
 
   switch (av) {
@@ -310,6 +313,18 @@ function doUltimate() {
 
 // ─── Combat phases ───────────────────────────────────────────────────────────
 
+function chargeUltOnTails(attacker, m) {
+  if (m.ultReady[attacker.id]) return; // already ready, nothing to do
+  m.ultCharges[attacker.id] = (m.ultCharges[attacker.id] || 0) + 1;
+  if (m.ultCharges[attacker.id] >= ULT_TAILS_TO_RECHARGE) {
+    m.ultReady[attacker.id] = true;
+    m.ultCharges[attacker.id] = 0;
+    addLog(`⚡ ${attacker.name}'s Ultimate recharged!`, 'ultimate');
+  } else {
+    addLog(`⚡ Ult charging: ${m.ultCharges[attacker.id]}/${ULT_TAILS_TO_RECHARGE}`, 'passive');
+  }
+}
+
 function doAttackCoin() {
   const attacker = getAttacker();
   const m = gameState.currentMatch;
@@ -318,7 +333,7 @@ function doAttackCoin() {
   const balancedKey = attacker.id + '_balanced_heal';
   if (m.stances[attacker.id] === 'balanced' && !m.passiveUsed[balancedKey]) {
     m.passiveUsed[balancedKey] = true;
-    const healed = Math.min(30, attacker.maxLp - attacker.lp);
+    const healed = Math.min(BALANCED_HEAL, attacker.maxLp - attacker.lp);
     if (healed > 0) {
       attacker.lp += healed;
       addLog(`⚖️ Balanced! ${attacker.name} recovers ${healed} LP → ${attacker.lp}`, 'stance');
@@ -362,12 +377,14 @@ function doAttackCoin() {
       m.phase = 'attack_roll';
     } else {
       addLog(`Reroll: TAILS. Attack fails — turn passes.`, 'tails');
+      chargeUltOnTails(attacker, m);
       passTurn();
     }
     return { coin, reroll };
   }
 
   addLog(`${attacker.name} flips — TAILS. Attack fails — turn passes.`, 'tails');
+  chargeUltOnTails(attacker, m);
   passTurn();
   return { coin };
 }
@@ -377,84 +394,90 @@ function doAttackRoll() {
   const defender = getDefender();
   const m = gameState.currentMatch;
 
-  // Determine dice count (Arcane Surge or Eagle Eye)
+  // Determine how many 2d6 pairs to roll (Arcane Surge = 3, Eagle Eye = 2, normal = 1)
   const surgeKey = attacker.id + '_surge';
   const eagleKey = attacker.id + '_eagleeye_dice';
-  let diceCount = 1;
+  let setCount = 1;
   let multLabel = '';
   if (m.ultFlags[surgeKey]) {
-    diceCount = 3;
-    multLabel = '🌟 Arcane Surge';
-    delete m.ultFlags[surgeKey];
+    setCount = 3; multLabel = '🌟 Arcane Surge'; delete m.ultFlags[surgeKey];
   } else if (m.ultFlags[eagleKey]) {
-    diceCount = 2;
-    multLabel = '🦅 Eagle Eye';
-    delete m.ultFlags[eagleKey];
+    setCount = 2; multLabel = '🦅 Eagle Eye';    delete m.ultFlags[eagleKey];
   }
 
-  const rolls = Array.from({ length: diceCount }, rollDice);
-  const baseRoll = Math.max(...rolls);
+  // Roll pairs of 2d6, keep the highest sum
+  const sets = Array.from({ length: setCount }, () => {
+    const d1 = rollDice(); const d2 = rollDice();
+    return { d1, d2, sum: d1 + d2 };
+  });
+  const best = sets.reduce((a, b) => a.sum >= b.sum ? a : b);
+  const { d1: die1, d2: die2, sum: baseSum } = best;
+  const isDoubles = die1 === die2;
 
-  if (diceCount > 1) {
-    addLog(`${multLabel}! Rolled [${rolls.join(', ')}] → kept ${baseRoll}.`, 'ultimate');
+  if (setCount > 1) {
+    addLog(`${multLabel}! Rolled [${sets.map(s => s.sum).join(', ')}] → kept ${baseSum}.`, 'ultimate');
   }
 
-  // Explosive dice: natural 6 adds a bonus roll
-  let roll = baseRoll;
+  // Explosive roll: sum ≥ 11 adds a bonus d6 (~8% chance per roll)
+  let roll = baseSum;
   let explosionBonus = 0;
-  if (baseRoll === 6) {
+  if (baseSum >= EXPLOSION_TRIGGER) {
     explosionBonus = rollDice();
-    roll = baseRoll + explosionBonus;
-    addLog(`💥 Explosive! 6 + ${explosionBonus} = ${roll} total attack value!`, 'passive');
+    roll = baseSum + explosionBonus;
+    addLog(`💥 Explosion! ${baseSum} + ${explosionBonus} = ${roll} total attack value!`, 'passive');
   }
 
-  m.attackRoll = baseRoll;
-  m.passiveBonus = 0;
-  let attackValue = roll;
+  m.attackRoll     = baseSum;
+  m.attackIsDoubles = isDoubles;
+  m.passiveBonus   = 0;
+  let attackValue  = roll;
 
-  // Skill checks on base roll
-  if (fighterHasSkill(attacker, 'perfect_hit') && baseRoll === 3) {
+  // Perfect Hit: sum ≤ PERFECT_HIT_TRIGGER → fixed value
+  if (fighterHasSkill(attacker, 'perfect_hit') && baseSum <= PERFECT_HIT_TRIGGER) {
     attackValue = PERFECT_HIT_VALUE;
-    addLog(`${attacker.name} rolls 3 — 🎯 Perfect Hit! Attack value: ${PERFECT_HIT_VALUE}.`, 'skill');
-  } else if (fighterHasSkill(attacker, 'double_strike') && baseRoll === 6) {
-    if (diceCount === 1 && !explosionBonus) addLog(`${attacker.name} rolls ${baseRoll} — ⚡ Double Strike primed!`, 'skill');
-    else addLog(`⚡ Double Strike primed!`, 'skill');
-  } else if (diceCount === 1 && !explosionBonus) {
-    addLog(`${attacker.name} rolls ${baseRoll}.`, 'normal');
+    addLog(`${attacker.name} rolls ${die1}+${die2}=${baseSum} — 🎯 Perfect Hit! Attack value: ${PERFECT_HIT_VALUE}.`, 'skill');
+  }
+  // Double Strike: doubles → double damage (applied in applyDmgMods via m.attackIsDoubles)
+  else if (fighterHasSkill(attacker, 'double_strike') && isDoubles) {
+    if (setCount === 1 && !explosionBonus) addLog(`${attacker.name} rolls ${die1}+${die2}=${baseSum} (doubles!) — ⚡ Double Strike primed!`, 'skill');
+    else addLog(`⚡ Double Strike primed! (${die1}+${die2}=${baseSum} doubles)`, 'skill');
+  }
+  else if (setCount === 1 && !explosionBonus) {
+    addLog(`${attacker.name} rolls ${die1}+${die2}=${baseSum}.`, 'normal');
   }
 
-  // Archer Precision: raise low rolls
-  if (attacker.avatar === 'archer' && attackValue < 3) {
-    addLog(`🏹 Precision! ${attacker.name}'s roll raised to 3.`, 'passive');
-    attackValue = 3;
+  // Archer Precision: sum ≤ PERFECT_HIT_TRIGGER → treated as 6
+  if (attacker.avatar === 'archer' && attackValue <= PERFECT_HIT_TRIGGER) {
+    addLog(`🏹 Precision! ${attacker.name}'s sum raised to 6.`, 'passive');
+    attackValue = 6;
   }
 
-  // Mage Spellpower: first roll ≥5 this round
+  // Mage Spellpower: first sum ≥ 9 this round → bonus damage
   const spellKey = attacker.id + '_spellpower';
-  if (attacker.avatar === 'mage' && baseRoll >= 5 && !m.passiveUsed[spellKey]) {
+  if (attacker.avatar === 'mage' && baseSum >= 9 && !m.passiveUsed[spellKey]) {
     m.passiveUsed[spellKey] = true;
     m.passiveBonus = MAGE_SPELLPOWER;
     addLog(`✨ Spellpower! +${MAGE_SPELLPOWER} bonus damage.`, 'passive');
   }
 
-  // Rogue Assassination: first roll 6 bypasses defender coin (Balanced stance resists)
+  // Rogue Assassination: first sum ≥ EXPLOSION_TRIGGER bypasses defense coin (Balanced resists)
   const assKey = attacker.id + '_assassination';
-  if (attacker.avatar === 'rogue' && baseRoll === 6 && !m.passiveUsed[assKey]) {
+  if (attacker.avatar === 'rogue' && baseSum >= EXPLOSION_TRIGGER && !m.passiveUsed[assKey]) {
     if (m.stances[defender.id] === 'balanced') {
-      m.passiveUsed[assKey] = true; // mark used so it doesn't retry
+      m.passiveUsed[assKey] = true;
       addLog(`⚖️ Balanced! ${defender.name} resists Assassination — defense coin proceeds normally.`, 'stance');
     } else {
       m.passiveUsed[assKey] = true;
       addLog(`🗡️ Assassination! ${defender.name}'s defense coin bypassed!`, 'passive');
       m.attackValue = attackValue;
       m.phase = 'defend_roll';
-      return { roll: baseRoll, attackValue, assassination: true, explosionBonus };
+      return { roll: baseSum, die1, die2, attackValue, assassination: true, explosionBonus, isDoubles };
     }
   }
 
   m.attackValue = attackValue;
   m.phase = 'defend_coin';
-  return { roll: baseRoll, attackValue, explosionBonus };
+  return { roll: baseSum, die1, die2, attackValue, explosionBonus, isDoubles };
 }
 
 function doDefendCoin() {
@@ -578,10 +601,10 @@ function doDefendRoll() {
 function applyDmgMods(dmg, attacker, defender, m) {
   if (dmg <= 0) return 0;
 
-  // Skill: Double Strike
-  if (fighterHasSkill(attacker, 'double_strike') && m.attackRoll === 6) {
+  // Skill: Double Strike (triggers on doubles roll)
+  if (fighterHasSkill(attacker, 'double_strike') && m.attackIsDoubles) {
     dmg *= 2;
-    addLog(`⚡ Double Strike! Damage ×2 → ${dmg}`, 'skill');
+    addLog(`⚡ Double Strike! Doubles — Damage ×2 → ${dmg}`, 'skill');
   }
   // Skill: Berserker (attacker)
   if (fighterHasSkill(attacker, 'berserker') && attacker.lp < BERSERKER_THRESHOLD) {
@@ -613,11 +636,11 @@ function applyDmgMods(dmg, attacker, defender, m) {
     addLog(`⚔️ Assault! +${ASSAULT_BONUS} bonus damage → ${dmg}`, 'stance');
   }
 
-  // Ultimate: Blood Rage — flat bonus, does not multiply (prevents stacking with Double Strike)
+  // Ultimate: Blood Rage — flat bonus (does not multiply, prevents damage chain)
   const rageKey = attacker.id + '_bloodrage';
   if (m.ultFlags[rageKey]) {
-    dmg += 80;
-    addLog(`💢 Blood Rage! +80 damage → ${dmg}`, 'ultimate');
+    dmg += BLOOD_RAGE_BONUS;
+    addLog(`💢 Blood Rage! +${BLOOD_RAGE_BONUS} → ${dmg}`, 'ultimate');
   }
 
   // PVE: Power Stone bonus damage (player only)
@@ -806,7 +829,8 @@ function startNextRound() {
   m.attackValue = 0;
   m.attackRoll  = 0;
   m.stances     = {};
-  m.ultFlags    = {};  // clear round/turn ult flags; ultUsed persists
+  m.ultFlags    = {};  // round/turn ult flags reset; ultReady/ultCharges persist
+  m.attackIsDoubles = false;
   m.phase = 'declare_1';
   m.log = [];
 }
@@ -924,8 +948,8 @@ function pveBuyItem(itemId) {
   pve.purchases.push(itemId);
 
   switch (itemId) {
-    case 'hp_boost':    pve.bonusMaxLp += 100; break;
-    case 'dmg_boost':   pve.bonusDmg   += 20;  break;
+    case 'hp_boost':    pve.bonusMaxLp += 50; break;
+    case 'dmg_boost':   pve.bonusDmg   += 10; break;
     case 'monster_intel': pve.intelActive = true; break;
     case 'revive':        pve.reviveActive = true; break;
     // dual_wield handled via renderPveShop skill picker

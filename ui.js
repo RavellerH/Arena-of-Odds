@@ -10,7 +10,10 @@ const uiState = {
   pendingAvatar: AVATARS[0].id,
   pendingSkill: SKILL_IDS[0],
   attackCoin: null,
-  attackDice: null,
+  attackDice: null,   // sum of 2d6
+  attackDie1: null,   // individual die 1
+  attackDie2: null,   // individual die 2
+  attackIsDoubles: false,
   attackExplosion: null,
   defendCoin: null,
   defendDice: null,
@@ -93,6 +96,9 @@ function escapeHtml(str) {
 function clearFightDisplay() {
   uiState.attackCoin = null;
   uiState.attackDice = null;
+  uiState.attackDie1 = null;
+  uiState.attackDie2 = null;
+  uiState.attackIsDoubles = false;
   uiState.attackExplosion = null;
   uiState.defendCoin = null;
   uiState.defendDice = null;
@@ -558,8 +564,11 @@ function renderFight(matchTitle, context) {
     if (uiState.attackCoin === 'heads')
       chips += `<span class="ctx-chip heads">⚔️ HEADS</span>`;
     if (uiState.attackDice) {
-      let diceLabel = `⚔️ Rolled ${DICE_FACES[Math.min(uiState.attackDice, 6)]} (${uiState.attackDice})`;
+      const d1f = uiState.attackDie1 ? DICE_FACES[uiState.attackDie1] : '🎲';
+      const d2f = uiState.attackDie2 ? DICE_FACES[uiState.attackDie2] : '🎲';
+      let diceLabel = `⚔️ ${d1f}+${d2f}=${uiState.attackDice}`;
       if (uiState.attackExplosion) diceLabel += ` 💥+${uiState.attackExplosion}`;
+      if (uiState.attackIsDoubles) diceLabel += ` ⚡Doubles!`;
       chips += `<span class="ctx-chip dice">${diceLabel}</span>`;
     }
   }
@@ -589,12 +598,28 @@ function renderFight(matchTitle, context) {
     actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">${btnLabel}</button>`;
 
   } else if (isDicePhase) {
-    const rawDice = phase === 'attack_roll' ? uiState.attackDice : uiState.defendDice;
-    const displayDice = rawDice ? Math.min(rawDice, 6) : null;
-    const diceFace = displayDice ? DICE_FACES[displayDice] : '🎲';
-    const diceCls  = rawDice ? 'rolled' : '';
-    const explosion = phase === 'attack_roll' && uiState.attackExplosion;
-    mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${diceFace}${explosion ? `<span class="explosion-badge">+${uiState.attackExplosion}</span>` : ''}</div>`;
+    if (phase === 'attack_roll') {
+      const hasRolled = !!uiState.attackDice;
+      const d1f = uiState.attackDie1 ? DICE_FACES[uiState.attackDie1] : '🎲';
+      const d2f = uiState.attackDie2 ? DICE_FACES[uiState.attackDie2] : '🎲';
+      const sumDisplay = uiState.attackDice || '?';
+      const explosion = uiState.attackExplosion;
+      const pairCls = hasRolled ? 'rolled' : '';
+      mainEl = `<div class="big-dice-pair ${pairCls}" id="fight-dice">
+        <div class="big-dice-face">${d1f}</div>
+        <div class="big-dice-sep">+</div>
+        <div class="big-dice-face">${d2f}</div>
+        <div class="big-dice-sep">=</div>
+        <div class="big-dice-total">${sumDisplay}${explosion ? `<span class="explosion-badge">+${explosion}</span>` : ''}</div>
+        ${uiState.attackIsDoubles && hasRolled ? '<div class="doubles-badge">⚡ Doubles!</div>' : ''}
+      </div>`;
+    } else {
+      const rawDice = uiState.defendDice;
+      const displayDice = rawDice ? Math.min(rawDice, 6) : null;
+      const diceFace = displayDice ? DICE_FACES[displayDice] : '🎲';
+      const diceCls = rawDice ? 'rolled' : '';
+      mainEl = `<div class="big-dice ${diceCls}" id="fight-dice">${diceFace}</div>`;
+    }
     roleLabel   = phase === 'attack_roll' ? '⚔️ ATTACKER' : '🛡️ DEFENDER';
     actionLabel = phase === 'attack_roll' ? 'Roll your attack dice' : 'Roll your defense dice';
     actionBtn = `<button class="btn btn-primary btn-large" onclick="handleFightAction()">
@@ -617,7 +642,7 @@ function renderFight(matchTitle, context) {
   // ── Ultimate button (attack turn only, if not yet used; hidden for PVE boss) ──
   let ultBtn = '';
   const isPlayerActing = gameState.mode !== 'pve' || !gameState.pve || actor.id === gameState.pve.playerId;
-  if (phase === 'attack_coin' && !m.ultUsed[actor.id] && isPlayerActing) {
+  if (phase === 'attack_coin' && m.ultReady && m.ultReady[actor.id] && isPlayerActing) {
     const ult = ULTIMATES[actor.avatar];
     if (ult) {
       ultBtn = `
@@ -631,8 +656,10 @@ function renderFight(matchTitle, context) {
   const f2Active = activeId === f2.id ? 'active-panel' : '';
   const logHtml  = m.log.map(e => `<div class="log-line ${e.type}">${e.text}</div>`).join('');
 
-  const f1UltUsed = m.ultUsed && m.ultUsed[f1.id];
-  const f2UltUsed = m.ultUsed && m.ultUsed[f2.id];
+  const f1Ready   = !m.ultReady || m.ultReady[f1.id];
+  const f2Ready   = !m.ultReady || m.ultReady[f2.id];
+  const f1Charges = (m.ultCharges && m.ultCharges[f1.id]) || 0;
+  const f2Charges = (m.ultCharges && m.ultCharges[f2.id]) || 0;
   const u1 = ULTIMATES[f1.avatar];
   const u2 = ULTIMATES[f2.avatar];
 
@@ -655,8 +682,8 @@ function renderFight(matchTitle, context) {
           ${renderPassiveBadge(f1.avatar)}
           ${renderStanceBadge(m.stances[f1.id])}
         </div>
-        ${u1 ? `<div class="ult-indicator ${f1UltUsed ? 'ult-used' : 'ult-ready'}" style="${!f1UltUsed ? `color:${u1.color}` : ''}">
-          ${u1.icon} ${f1UltUsed ? 'Ult Used' : 'Ult Ready'}
+        ${u1 ? `<div class="ult-indicator ${f1Ready ? 'ult-ready' : 'ult-charging'}" style="${f1Ready ? `color:${u1.color}` : ''}">
+          ${f1Ready ? `${u1.icon} Ult Ready` : `⚡ ${'●'.repeat(f1Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f1Charges)} Charging`}
         </div>` : ''}
       </div>
       <div class="fighter-panel ${f2Active}">
@@ -671,8 +698,8 @@ function renderFight(matchTitle, context) {
           ${renderPassiveBadge(f2.avatar)}
           ${renderStanceBadge(m.stances[f2.id])}
         </div>
-        ${u2 ? `<div class="ult-indicator ${f2UltUsed ? 'ult-used' : 'ult-ready'}" style="${!f2UltUsed ? `color:${u2.color}` : ''}">
-          ${u2.icon} ${f2UltUsed ? 'Ult Used' : 'Ult Ready'}
+        ${u2 ? `<div class="ult-indicator ${f2Ready ? 'ult-ready' : 'ult-charging'}" style="${f2Ready ? `color:${u2.color}` : ''}">
+          ${f2Ready ? `${u2.icon} Ult Ready` : `⚡ ${'●'.repeat(f2Charges)}${'○'.repeat(ULT_TAILS_TO_RECHARGE - f2Charges)} Charging`}
         </div>` : ''}
       </div>
     </div>
@@ -712,8 +739,11 @@ function handleFightAction() {
     animateEl('fight-coin', 'flip-anim');
 
   } else if (phase === 'attack_roll') {
-    const { roll, explosionBonus } = doAttackRoll();
+    const { roll, die1, die2, explosionBonus, isDoubles } = doAttackRoll();
     uiState.attackDice = roll;
+    uiState.attackDie1 = die1;
+    uiState.attackDie2 = die2;
+    uiState.attackIsDoubles = isDoubles || false;
     uiState.attackExplosion = explosionBonus || null;
     rerenderFight();
     animateEl('fight-dice', 'roll-anim');
@@ -1351,26 +1381,27 @@ function renderHowToPlay() {
       <div class="card howto-section">
         <h3>Turn Order</h3>
         <ol>
-          <li><strong>Attack Coin</strong> — Attacker flips. HEADS = proceed. TAILS = turn ends.</li>
-          <li><strong>Attack Dice</strong> — Attacker rolls 1d6. Rolling a 6 adds an explosive bonus roll!</li>
-          <li><strong>Defense Coin</strong> — Defender flips. HEADS = proceed. TAILS = full damage.</li>
-          <li><strong>Defense Dice</strong> — Defender rolls 1d6. Roll ≥ attack = blocked. Roll &lt; attack = damage.</li>
+          <li><strong>Attack Coin</strong> — Attacker flips. HEADS = proceed. TAILS = turn ends (charges ult).</li>
+          <li><strong>Attack Dice</strong> — Attacker rolls 2d6 and takes the sum. Sum ≥ 11 triggers an explosive bonus d6!</li>
+          <li><strong>Defense Coin</strong> — Defender flips. HEADS = proceed to defense roll. TAILS = full damage.</li>
+          <li><strong>Defense Dice</strong> — Defender rolls 1d6. Roll ≥ attack sum = blocked. Roll &lt; attack sum = damage.</li>
         </ol>
       </div>
 
       <div class="card howto-section">
         <h3>Damage Formula</h3>
         <ul>
-          <li>Defense TAILS → <strong>attack value × 10</strong></li>
+          <li>Defense TAILS → <strong>attack sum × 6</strong></li>
           <li>Defense HEADS, blocked → <strong>0 damage</strong></li>
-          <li>Defense HEADS, not blocked → <strong>(attack − defense) × 10</strong></li>
-          <li>Attack roll of 6 → <strong>explosive bonus die added to attack value!</strong></li>
+          <li>Defense HEADS, not blocked → <strong>(attack sum − defense) × 6</strong></li>
+          <li>2d6 sum ≥ 11 → <strong>explosive bonus d6 added to attack value!</strong></li>
+          <li>Matching dice (doubles) → primes the <strong>Double Strike</strong> skill for ×2 damage!</li>
         </ul>
       </div>
 
       <div class="card howto-section">
-        <h3>Ultimates — Once per Match</h3>
-        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px">Use your ultimate at the start of your attack turn. Once used, it's gone for the match.</p>
+        <h3>Ultimates — Rechargeable</h3>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px">Use your ultimate at the start of your attack turn. Landing TAILS twice on your attack coin recharges it — bad luck builds toward your next power play.</p>
         <div>${ultimatesHtml}</div>
       </div>
 
@@ -1387,7 +1418,7 @@ function renderHowToPlay() {
       <div class="card howto-section">
         <h3>Match Rules</h3>
         <ul>
-          <li>Fighters start at <strong>500 LP</strong> per round (Warrior: 600 LP, scales upward).</li>
+          <li>Fighters start at <strong>200 LP</strong> per round (Warrior: 250 LP, scales +10 per round won).</li>
           <li>First to drop opponent to 0 LP wins the round.</li>
           <li>Regular matches: Best of 3. Finals: Best of 5.</li>
           <li>Loser of each round attacks first next round.</li>
