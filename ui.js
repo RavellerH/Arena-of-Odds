@@ -1,4 +1,4 @@
-// ui.js — Screen rendering and event handling
+ // ui.js — Screen rendering and event handling
 
 const DICE_FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
@@ -119,7 +119,7 @@ function renderMenu() {
       ${continueBtn}
       <button class="btn btn-primary btn-large" onclick="goNewGame()">New Game</button>
       <button class="btn btn-secondary"         onclick="startPveSetup()">⚔️ PVE Campaign</button>
-      <button class="btn btn-secondary"         onclick="goHowToPlay()">How to Play</button>
+      <button class="btn btn-secondary"         onclick="goHowToPlay()">How to Play</button>       <button class="btn btn-secondary" onclick="goAbout()">About</button>
     </div>
     <p class="subtitle">Coin · Dice · Duel &nbsp;·&nbsp; 4–8 Players</p>
   `);
@@ -147,7 +147,7 @@ function goNewGame() {
   renderPlayerCount();
 }
 
-function goHowToPlay() { renderHowToPlay(); }
+function goHowToPlay() { renderHowToPlay(); } function goAbout() { renderAbout(); } function renderAbout() {   setHTML('screen-about', `     <div class="howtoplay-content">       <h2>About Arena of Odds</h2>       <p>A browser-based tactical combat game where strategy meets chance. Pick your avatar, equip a skill, choose a stance, then battle opponents using coin flips and dice rolls.</p>       <h3>Avatars</h3>       <ul>         ${AVATARS.map(a => `<li><strong>${a.name}</strong> &mdash; ${a.passive}</li>`).join('')}       </ul>       <h3>Skills</h3>       <ul>         ${SKILLS.map(s => `<li><strong>${s.name}</strong> &mdash; ${s.desc}</li>`).join('')}       </ul>       <h3>Stances</h3>       <ul>         ${STANCES.map(s => `<li><strong>${s.name}</strong> &mdash; ${s.desc}</li>`).join('')}       </ul>       <h3>Tech</h3>       <p>Built with vanilla HTML5, CSS3, and JavaScript &mdash; no frameworks. Deployed via GitHub Pages.</p>       <p style="margin-top:1rem;"><a href="https://github.com/RavellerH/Arena-of-Odds" target="_blank" style="color:var(--gold);">View on GitHub</a></p>       <button class="btn btn-secondary" onclick="renderMenu()">Back to Menu</button>     </div>   `);   showScreen('screen-about'); }
 
 // ── PLAYER COUNT ──────────────────────────────────────────────────────────────
 
